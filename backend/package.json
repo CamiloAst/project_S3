@@ -1,0 +1,27 @@
+{
+  "name": "geriatric-companion-ai-backend",
+  "version": "1.0.0",
+  "description": "API RESTful backend con Express.js y Google Gemini para el chatbot de acompañamiento emocional en adultos mayores (Modelo CARE).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "express",
+    "gemini",
+    "gerontology",
+    "chatbot",
+    "android",
+    "emotional-support"
+  ],
+  "author": "Senior Backend & AI Architect",
+  "license": "MIT",
+  "dependencies": {
+    "@google/generative-ai": "^0.24.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "morgan": "^1.10.0"
+  }
+}
