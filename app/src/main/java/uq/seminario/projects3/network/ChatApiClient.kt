@@ -1,94 +1,130 @@
 package uq.seminario.projects3.network
 
+import android.util.Log
+import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
-import java.net.HttpURLConnection
-import java.net.URL
+import okhttp3.OkHttpClient
+import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.Retrofit
+import retrofit2.converter.gson.GsonConverterFactory
+import retrofit2.http.Body
+import retrofit2.http.POST
+import java.util.concurrent.TimeUnit
 
 /**
- * Modelo de datos del esquema estructurado CARE devuelto por el backend Node.js / Gemini.
+ * Cuerpo de la petición POST /api/chat enviada al backend Node.js.
  */
-data class CareResponseData(
-    val spokenText: String,
-    val screenText: String,
-    val userEmotion: String,
-    val suggestedAction: String
+data class ChatRequest(
+    @SerializedName("sessionId")
+    val sessionId: String,
+    @SerializedName("message")
+    val message: String
 )
 
 /**
- * Cliente HTTP ligero y nativo para comunicar la app Android con el backend Node.js.
- * Utiliza HttpURLConnection y org.json nativo de Android (cero dependencias externas adicionales).
+ * Respuesta envolvente devuelta por el endpoint POST /api/chat.
+ */
+data class ChatResponse(
+    @SerializedName("success")
+    val success: Boolean,
+    @SerializedName("sessionId")
+    val sessionId: String,
+    @SerializedName("data")
+    val data: ChatData
+)
+
+/**
+ * Datos multimodales sincronizados del Modelo CARE devueltos por el backend,
+ * incluyendo síntesis de voz neural en Base64 y reloj maestro de sincronía (audio_duration_ms).
+ */
+data class ChatData(
+    @SerializedName("spoken_text")
+    val spoken_text: String,
+    @SerializedName("screen_text")
+    val screen_text: String,
+    @SerializedName("user_emotion")
+    val user_emotion: String,
+    @SerializedName("suggested_action")
+    val suggested_action: String,
+    @SerializedName("audio_base64")
+    val audio_base64: String? = null,
+    @SerializedName("audio_duration_ms")
+    val audio_duration_ms: Long? = null
+)
+
+/**
+ * Contrato Retrofit para la comunicación con el backend local en Node.js.
+ */
+interface ChatApiService {
+    @POST("api/chat")
+    suspend fun sendMessage(@Body request: ChatRequest): ChatResponse
+}
+
+/**
+ * Cliente Retrofit singleton configurado con OkHttpClient (timeouts de 15s)
+ * para soportar la latencia del LLM sin lanzar SocketTimeoutException.
  */
 object ChatApiClient {
 
     /**
-     * NOTA DE CONEXIÓN:
-     * - Si ejecutas en el EMULADOR de Android Studio: Usa "http://10.0.2.2:3000/api/chat"
-     *   (10.0.2.2 es la IP virtual que apunta al localhost de la máquina host).
-     * - Si ejecutas en un CELULAR FÍSICO conectado por USB o Wi-Fi: Reemplaza 10.0.2.2 por la
-     *   IP local de tu PC (ej: "http://192.168.1.50:3000/api/chat").
+     * URL base hacia el localhost de la máquina host desde el emulador Android (10.0.2.2:3000).
      */
-    var baseUrl: String = "http://10.0.2.2:3000/api/chat"
+    private const val BASE_URL = "http://10.0.2.2:3000/"
 
+    private const val LOG_TAG = "ChatApiClient"
+
+    /**
+     * Expresión regular que oculta el MP3 en Base64 dentro de los logs HTTP para evitar
+     * saturar Logcat con decenas de kilobytes por respuesta, conservando el resto del JSON.
+     */
+    private val base64AudioRegex = Regex(""""audio_base64"\s*:\s*"([^"]+)"""")
+
+    private val loggingInterceptor = HttpLoggingInterceptor { message ->
+        val sanitized = base64AudioRegex.replace(message) { match ->
+            """"audio_base64":"<MP3 Base64 omitido (${match.groupValues[1].length} chars)>""""
+        }
+        Log.d(LOG_TAG, sanitized)
+    }.apply {
+        level = HttpLoggingInterceptor.Level.BODY
+    }
+
+    private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(15, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .addInterceptor(loggingInterceptor)
+        .build()
+
+    private val retrofit: Retrofit = Retrofit.Builder()
+        .baseUrl(BASE_URL)
+        .client(okHttpClient)
+        .addConverterFactory(GsonConverterFactory.create())
+        .build()
+
+    val apiService: ChatApiService = retrofit.create(ChatApiService::class.java)
+
+    /**
+     * Envía el mensaje transcrito por el adulto mayor hacia POST http://10.0.2.2:3000/api/chat.
+     * `sessionId` debe ser el identificador único de la instalación (ver SessionIdProvider).
+     */
     suspend fun sendChatMessage(
         message: String,
-        sessionId: String = "android_senior_session"
-    ): Result<CareResponseData> = withContext(Dispatchers.IO) {
-        var connection: HttpURLConnection? = null
+        sessionId: String
+    ): Result<ChatResponse> = withContext(Dispatchers.IO) {
         try {
-            val url = URL(baseUrl)
-            connection = (url.openConnection() as HttpURLConnection).apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json; charset=UTF-8")
-                setRequestProperty("Accept", "application/json")
-                connectTimeout = 7000
-                readTimeout = 12000
-                doOutput = true
-                doInput = true
-            }
-
-            val requestJson = JSONObject().apply {
-                put("message", message)
-                put("sessionId", sessionId)
-            }
-
-            OutputStreamWriter(connection.outputStream, "UTF-8").use { writer ->
-                writer.write(requestJson.toString())
-                writer.flush()
-            }
-
-            val statusCode = connection.responseCode
-            val inputStream = if (statusCode in 200..299) {
-                connection.inputStream
+            val request = ChatRequest(
+                sessionId = sessionId,
+                message = message
+            )
+            val response = apiService.sendMessage(request)
+            if (response.success) {
+                Result.success(response)
             } else {
-                connection.errorStream
-            }
-
-            val responseBody = BufferedReader(InputStreamReader(inputStream, "UTF-8")).use {
-                it.readText()
-            }
-
-            if (statusCode in 200..299) {
-                val rootJson = JSONObject(responseBody)
-                val dataObj = rootJson.getJSONObject("data")
-                val responseData = CareResponseData(
-                    spokenText = dataObj.optString("spoken_text", ""),
-                    screenText = dataObj.optString("screen_text", ""),
-                    userEmotion = dataObj.optString("user_emotion", "neutro"),
-                    suggestedAction = dataObj.optString("suggested_action", "continue")
-                )
-                Result.success(responseData)
-            } else {
-                Result.failure(Exception("Error HTTP $statusCode: $responseBody"))
+                Result.failure(IllegalStateException("El servidor indicó success=false para la sesión $sessionId"))
             }
         } catch (e: Exception) {
             Result.failure(e)
-        } finally {
-            connection?.disconnect()
         }
     }
 }

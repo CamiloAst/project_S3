@@ -1,6 +1,5 @@
 package uq.seminario.projects3.ui.screens
 
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,13 +19,11 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,6 +31,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -43,7 +42,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import uq.seminario.projects3.ui.theme.ActionDarkBlue
+import uq.seminario.projects3.ui.components.AppNavigationHeader
+import uq.seminario.projects3.ui.components.BasicControlsBar
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.CardSurface
 import uq.seminario.projects3.ui.theme.DarkText
@@ -55,21 +55,24 @@ import uq.seminario.projects3.ui.theme.ProjectS3Theme
 /**
  * Pantalla de Reparación Silenciosa ("Pantalla de la Lupa")
  *
- * Se muestra cuando el STT no detecta voz clara o hay ruido de fondo,
- * evitando cuadros de diálogo genéricos o frustrantes del sistema operativo.
- *
- * Características de accesibilidad:
- * - Iconografía grande y amigable (lupa en contenedor cálido).
- * - Mensaje comprensivo y claro (>=28sp): "No he entendido tu pregunta. ¿Puedes repetirla?".
- * - Botón de acción masivo (>=64dp) para reintentar la interacción por voz.
+ * Se muestra cuando el STT no detecta voz clara o hay ruido de fondo.
+ * - Barra superior `AppNavigationHeader` con "← Atrás" e "🏠 Inicio".
+ * - Centro con ícono de lupa amigable y mensaje claro (>=28sp).
+ * - Footer limpio con controles de lectura ("Pausar lectura / Continuar lectura" y "Repetir") + "Volver a hablar".
  */
 @Composable
 fun RepairScreen(
     message: String = "No he entendido tu pregunta. ¿Puedes repetirla?",
     onRetryClick: () -> Unit,
     onBackToHomeClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isPaused: Boolean = false,
+    onBackClick: () -> Unit = onBackToHomeClick,
+    onTogglePauseClick: () -> Unit = {},
+    onRepeatClick: () -> Unit = {}
 ) {
+    val haptic = LocalHapticFeedback.current
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = BeigeBackground
@@ -78,28 +81,42 @@ fun RepairScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 24.dp, vertical = 20.dp),
+                .padding(horizontal = 24.dp, vertical = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Header sutil
-            Text(
-                text = "Estamos para escucharte",
-                style = MaterialTheme.typography.bodyLarge.copy(
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = MutedDarkText
-                ),
-                textAlign = TextAlign.Center,
-                modifier = Modifier.padding(top = 12.dp)
-            )
+            // Barra superior de navegación + subtítulo sutil
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                AppNavigationHeader(
+                    isIdle = false,
+                    showBackButton = true,
+                    showHomeButton = true,
+                    onBackClick = onBackClick,
+                    onHomeClick = onBackToHomeClick
+                )
+
+                Spacer(modifier = Modifier.height(6.dp))
+
+                Text(
+                    text = "Estamos para escucharte",
+                    style = MaterialTheme.typography.bodyLarge.copy(
+                        fontSize = 20.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MutedDarkText
+                    ),
+                    textAlign = TextAlign.Center
+                )
+            }
 
             // Centro: Icono de lupa prominente + Mensaje comprensivo
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .weight(1f)
-                    .padding(vertical = 12.dp),
+                    .padding(vertical = 10.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(
@@ -109,10 +126,9 @@ fun RepairScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    // Contenedor circular con icono de Lupa (búsqueda/comprensión)
                     Box(
                         modifier = Modifier
-                            .size(110.dp)
+                            .size(106.dp)
                             .clip(CircleShape)
                             .background(CardSurface)
                             .semantics {
@@ -124,13 +140,12 @@ fun RepairScreen(
                             imageVector = Icons.Default.Search,
                             contentDescription = null,
                             tint = ListeningTerracotta,
-                            modifier = Modifier.size(62.dp)
+                            modifier = Modifier.size(60.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.height(28.dp))
+                    Spacer(modifier = Modifier.height(24.dp))
 
-                    // Mensaje principal grande y claro (>=28sp)
                     Text(
                         text = message,
                         style = MaterialTheme.typography.headlineLarge.copy(
@@ -143,7 +158,7 @@ fun RepairScreen(
                         modifier = Modifier.fillMaxWidth()
                     )
 
-                    Spacer(modifier = Modifier.height(14.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
                         text = "Puedes hablar más despacio o acercarte un poco más al teléfono.",
@@ -158,17 +173,26 @@ fun RepairScreen(
                 }
             }
 
-            // Footer: Botón masivo para volver a hablar (>=64dp) + opción de volver
+            // Footer limpio: Pausar/Continuar lectura + Repetir y botón masivo "Volver a hablar"
             Column(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(14.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
+                BasicControlsBar(
+                    isPaused = isPaused,
+                    onTogglePause = onTogglePauseClick,
+                    onRepeat = onRepeatClick
+                )
+
                 Button(
-                    onClick = onRetryClick,
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onRetryClick()
+                    },
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 72.dp)
+                        .heightIn(min = 68.dp)
                         .semantics {
                             role = Role.Button
                             contentDescription = "Volver a hablar ahora"
@@ -200,28 +224,6 @@ fun RepairScreen(
                             )
                         )
                     }
-                }
-
-                OutlinedButton(
-                    onClick = onBackToHomeClick,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 64.dp)
-                        .semantics {
-                            role = Role.Button
-                            contentDescription = "Regresar a la pantalla de inicio"
-                        },
-                    shape = RoundedCornerShape(18.dp),
-                    border = BorderStroke(2.dp, ActionDarkBlue)
-                ) {
-                    Text(
-                        text = "Ir al inicio",
-                        style = MaterialTheme.typography.labelLarge.copy(
-                            fontSize = 20.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = ActionDarkBlue
-                        )
-                    )
                 }
             }
         }

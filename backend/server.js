@@ -9,7 +9,13 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const morgan = require("morgan");
-const { handleChat, clearSession, getSessionInfo } = require("./controllers/chatController");
+const {
+  handleChat,
+  clearSession,
+  getSessionInfo,
+  getAiStatus,
+  sessionStore
+} = require("./controllers/chatController");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -57,13 +63,11 @@ const healthHandler = (req, res) => {
   res.status(200).json({
     status: "ok",
     service: "Geriatric Companion AI Backend",
-    version: "1.0.0",
+    version: "1.1.0",
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
-    aiProvider: {
-      model: process.env.GEMINI_MODEL || "gemini-2.0-flash",
-      configured: Boolean(process.env.GEMINI_API_KEY && process.env.GEMINI_API_KEY !== "tu_gemini_api_key_aqui")
-    }
+    sessionStore: sessionStore.kind,
+    aiProvider: getAiStatus()
   });
 };
 
@@ -126,21 +130,21 @@ const server = app.listen(PORT, () => {
   console.log("=======================================================\n");
 });
 
-// Graceful shutdown
-process.on("SIGTERM", () => {
-  console.log("Cerrando servidor HTTP con elegancia (SIGTERM)...");
-  server.close(() => {
+// Graceful shutdown (persiste sesiones pendientes antes de salir)
+function shutdown(signal) {
+  console.log(`Cerrando servidor HTTP con elegancia (${signal})...`);
+  server.close(async () => {
+    try {
+      await sessionStore.close();
+    } catch (err) {
+      console.error("Error cerrando sessionStore:", err.message);
+    }
     console.log("Servidor cerrado.");
     process.exit(0);
   });
-});
+}
 
-process.on("SIGINT", () => {
-  console.log("Cerrando servidor HTTP con elegancia (SIGINT)...");
-  server.close(() => {
-    console.log("Servidor cerrado.");
-    process.exit(0);
-  });
-});
+process.on("SIGTERM", () => shutdown("SIGTERM"));
+process.on("SIGINT", () => shutdown("SIGINT"));
 
 module.exports = app;

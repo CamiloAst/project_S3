@@ -21,3 +21,15 @@ val DecisionPastelGreenBorder = Color(0xFFAAC8B2)
 // Elementos de superficie y bordes
 val CardSurface = Color(0xFFFFFFFF)
 val BorderStrokeColor = Color(0xFFD9D4C7)
+
+// Alerta de posible emergencia (alto contraste, sin tonos agresivos)
+val EmergencyRed = Color(0xFFA4161A)
+val EmergencySurface = Color(0xFFFDECEA)
+val EmergencyBorder = Color(0xFFE8A6A1)
+
+// Adaptación afectiva (tonos cálidos y serenos ante tristeza o soledad)
+val SereneWarmBackground = Color(0xFFF2E8DC)
+val SereneWarmCardSurface = Color(0xFFFFFBF5)
+val SereneRecommendationSurface = Color(0xFFE7F0EA)
+val SereneRecommendationBorder = Color(0xFFB7D1C0)
+val SereneCalmAccent = Color(0xFF2B5B46)
