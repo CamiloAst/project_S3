@@ -18,6 +18,8 @@ const TTS_FORMAT = OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3;
 const TTS_CONNECTION_TIMEOUT_MS = 1900; // Si falla la conexión WebSocket, aborta en < 2s
 const TTS_FAILFAST_FIRST_BYTE_MS = 1950; // Si el stream no emite audio tras enviar SSML, aborta en < 2s
 const TTS_MAX_STREAM_MS = 6000; // Límite total cuando ya están llegando chunks de audio activos
+// Peor caso de una síntesis (conexión + stream completo); lo usa el presupuesto de /api/chat
+const TTS_WORST_CASE_MS = TTS_CONNECTION_TIMEOUT_MS + TTS_MAX_STREAM_MS;
 
 /**
  * Mapa de modulación prosódica afectiva según la emoción detectada del adulto mayor.
@@ -352,5 +354,6 @@ module.exports = {
   AFFECTIVE_PROSODY_MAP,
   getProsodyForEmotion,
   calculateAudioDurationMs,
-  synthesizeSpeechWithEmotion
+  synthesizeSpeechWithEmotion,
+  TTS_WORST_CASE_MS
 };

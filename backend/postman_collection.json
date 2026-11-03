@@ -23,7 +23,10 @@
 						"health"
 					]
 				},
-				"description": "Verifica el estado del servidor, uptime y si Gemini está configurado."
+				"description": "Verifica el estado del servidor, uptime y si Gemini está configurado.",
+				"auth": {
+					"type": "noauth"
+				}
 			},
 			"response": []
 		},
@@ -162,6 +165,23 @@
 				"description": "Limpia la memoria conversacional de la sesión."
 			},
 			"response": []
+		}
+	],
+	"auth": {
+		"type": "bearer",
+		"bearer": [
+			{
+				"key": "token",
+				"value": "{{apiToken}}",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"key": "apiToken",
+			"value": "",
+			"description": "Mismo valor que API_ACCESS_TOKEN del backend"
 		}
 	]
 }

@@ -28,9 +28,13 @@ La respuesta de la API está pensada para que la app Android combine sus modalid
 backend/
 ├── controllers/
 │   └── chatController.js       # Orquestación con @google/genai, System Prompt, Guardrails y Banco CARE
+├── middleware/
+│   └── security.js             # Token de acceso, límite de peticiones por IP y CORS
 ├── services/
+│   ├── emergencyDetector.js    # Frases de posible emergencia (replicadas en la app Android)
 │   ├── sessionStore.js         # Persistencia de sesiones (archivo JSON atómico, Redis o memoria)
 │   └── ttsService.js           # Síntesis de voz neural (msedge-tts) con modulación afectiva y fail-fast
+├── test/                       # Pruebas automáticas (npm test) y casos compartidos con Android
 ├── package.json                # Dependencias (Express, @google/genai, msedge-tts, cors, etc.)
 ├── server.js                   # Servidor Express, CORS, healthcheck y cierre ordenado
 ├── test-api.js                 # Script de pruebas automatizadas de escenarios CARE
@@ -88,6 +92,9 @@ npm run dev
 ### `POST /api/chat`
 Endpoint principal invocado por la app Android tras la transcripción de voz (STT).
 
+#### Autenticación y límites
+Si `API_ACCESS_TOKEN` está definido (obligatorio en producción), todas las rutas `/api/chat*` exigen `Authorization: Bearer <token>` o `X-API-Key: <token>`; sin él responden `401`. Al superar el límite por minuto responden `429`. `GET /api/health` es público e indica `authRequired`.
+
 #### Request Body
 `sessionId` es **obligatorio** (1-128 caracteres: letras, números, `_`, `-`, `.` o `:`). La app Android envía un identificador único por instalación; si falta, la API responde `400`.
 ```json
@@ -130,7 +137,7 @@ En la raíz de la respuesta también se incluye `source` (`"gemini"`, `"fallback
 
 ## 🛡️ Clasificación Emocional, Guardrails y Persistencia
 
-1. **Pre-LLM Emergency Guardrail (< 5 ms):** Intercepta expresiones críticas de riesgo vital (dolor agudo de pecho, caídas graves, asfixia, ideación suicida) mediante expresiones regulares deterministas antes de llamar al LLM, forzando `emergency_alert`.
+1. **Pre-LLM Emergency Guardrail (< 5 ms):** `services/emergencyDetector.js` intercepta frases de posible riesgo vital (dolor en el pecho, posible infarto, caídas, dificultad para respirar, signos de ACV, desmayo, sangrado, ideación suicida) sobre el texto normalizado, antes de llamar al LLM, forzando `emergency_alert`. Se usan frases explícitas para evitar falsos positivos como *"mi vecino tuvo un infarto"*.
 2. **Clasificación Emocional con Gemini (Opción A):** Gemini clasifica la emoción del último mensaje en una de las 5 categorías (`user_emotion` con `enum` estricto en Structured Outputs) atendiendo negaciones y contexto (*"no me siento bien"*, *"buenas tardes"*, *"solo quería saludarte"*), y adapta la respuesta según la guía CARE correspondiente.
 3. **Banco de Respaldo y Anti-Repetición:** Si Gemini supera el timeout o no está disponible, se registra el motivo exacto del fallo y entra el detector por palabras clave + `RESPONSE_VARIATIONS_BANK` (6 variaciones por categoría sin repetición por sesión).
 4. **Post-LLM Medical Guardrail:** Detecta indicaciones de dosis o prescripción médica con límites de palabra (`\b`) sin falsos positivos en frases cotidianas como *"¿tomamos un respiro?"* o *"toma un vaso con agua"*.

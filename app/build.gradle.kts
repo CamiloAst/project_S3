@@ -1,7 +1,28 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
 }
+
+// Configuración del backend leída de local.properties (no versionado) o de -P en la línea de comandos:
+//   care.apiBaseUrl.debug=http://192.168.1.50:3000/   (por defecto: emulador 10.0.2.2)
+//   care.apiBaseUrl.release=https://tu-servidor/
+//   care.apiToken=<mismo valor que API_ACCESS_TOKEN del backend>
+// providers.fileContents registra el archivo como entrada del configuration cache:
+// al cambiar local.properties se vuelve a generar BuildConfig con los valores nuevos.
+val localProperties = Properties().apply {
+    providers.fileContents(rootProject.layout.projectDirectory.file("local.properties"))
+        .asText.orNull?.let { load(it.reader()) }
+}
+
+val releaseBaseUrlPlaceholder = "https://configura-care-apiBaseUrl-release.invalid/"
+
+fun careProperty(name: String, default: String): String =
+    (localProperties.getProperty(name) ?: providers.gradleProperty(name).orNull ?: default).trim()
+
+fun asBuildConfigString(value: String): String =
+    "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 
 android {
     namespace = "uq.seminario.projects3"
@@ -17,10 +38,25 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        buildConfigField("String", "CARE_API_TOKEN", asBuildConfigString(careProperty("care.apiToken", "")))
     }
 
     buildTypes {
+        debug {
+            buildConfigField(
+                "String",
+                "CARE_API_BASE_URL",
+                asBuildConfigString(careProperty("care.apiBaseUrl.debug", "http://10.0.2.2:3000/"))
+            )
+        }
         release {
+            // Release solo permite HTTPS (usesCleartextTraffic=false en el manifest principal)
+            buildConfigField(
+                "String",
+                "CARE_API_BASE_URL",
+                asBuildConfigString(careProperty("care.apiBaseUrl.release", releaseBaseUrlPlaceholder))
+            )
             optimization {
                 enable = true
                 packageScope = setOf("androidx.**", "kotlin.**", "kotlinx.**")
@@ -33,6 +69,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -59,4 +96,23 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
+}
+// Un release sin servidor configurado fallaría en silencio (siempre respaldo local): se detiene el build.
+val releaseBaseUrl = careProperty("care.apiBaseUrl.release", releaseBaseUrlPlaceholder)
+tasks.matching { it.name == "preReleaseBuild" }.configureEach {
+    // Copias locales: la acción no debe capturar el script (configuration cache)
+    val url = releaseBaseUrl
+    val placeholder = releaseBaseUrlPlaceholder
+    doFirst {
+        check(url != placeholder && url.startsWith("https://")) {
+            "Define care.apiBaseUrl.release=https://... en local.properties antes de generar un release."
+        }
+    }
+}
+
+// EmergencyDetectorTest lee los casos compartidos con el backend: se declaran como entrada
+// para que la prueba vuelva a ejecutarse cuando cambien.
+tasks.withType<Test>().configureEach {
+    inputs.file(rootProject.layout.projectDirectory.file("backend/test/emergency-cases.json"))
+        .withPropertyName("sharedEmergencyCases")
 }

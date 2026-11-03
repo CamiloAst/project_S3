@@ -4,7 +4,9 @@ import android.util.Log
 import com.google.gson.annotations.SerializedName
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.Interceptor
 import okhttp3.OkHttpClient
+import uq.seminario.projects3.BuildConfig
 import okhttp3.logging.HttpLoggingInterceptor
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
@@ -62,15 +64,23 @@ interface ChatApiService {
 }
 
 /**
- * Cliente Retrofit singleton configurado con OkHttpClient (timeouts de 15s)
- * para soportar la latencia del LLM sin lanzar SocketTimeoutException.
+ * Cliente Retrofit singleton.
+ *
+ * Tiempos de espera: el backend puede tardar hasta ~16 s en el peor caso (Gemini 8 s +
+ * Edge TTS ~8 s), por lo que la lectura espera 25 s y la llamada completa 30 s. Si se
+ * suben GEMINI_TIMEOUT_MS o los límites de ttsService.js, revisar estos valores: si la app
+ * corta antes, usa su respaldo local mientras el backend ya guardó otra respuesta.
  */
 object ChatApiClient {
 
     /**
-     * URL base hacia el localhost de la máquina host desde el emulador Android (10.0.2.2:3000).
+     * URL base por tipo de build (`care.apiBaseUrl.debug` / `care.apiBaseUrl.release` en
+     * local.properties). Por defecto en debug: el host desde el emulador (10.0.2.2:3000).
      */
-    private const val BASE_URL = "http://10.0.2.2:3000/"
+    private val BASE_URL = BuildConfig.CARE_API_BASE_URL.let { if (it.endsWith("/")) it else "$it/" }
+
+    /** Token compartido con el backend (`API_ACCESS_TOKEN`); vacío = no se envía. */
+    private val API_TOKEN = BuildConfig.CARE_API_TOKEN
 
     private const val LOG_TAG = "ChatApiClient"
 
@@ -86,13 +96,28 @@ object ChatApiClient {
         }
         Log.d(LOG_TAG, sanitized)
     }.apply {
-        level = HttpLoggingInterceptor.Level.BODY
+        // El cuerpo contiene conversaciones de salud: solo se registra en debug
+        level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY else HttpLoggingInterceptor.Level.NONE
+        redactHeader("Authorization")
+    }
+
+    private val authInterceptor = Interceptor { chain ->
+        val request = if (API_TOKEN.isNotBlank()) {
+            chain.request().newBuilder()
+                .header("Authorization", "Bearer $API_TOKEN")
+                .build()
+        } else {
+            chain.request()
+        }
+        chain.proceed(request)
     }
 
     private val okHttpClient: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(25, TimeUnit.SECONDS)
         .writeTimeout(15, TimeUnit.SECONDS)
+        .callTimeout(30, TimeUnit.SECONDS)
+        .addInterceptor(authInterceptor)
         .addInterceptor(loggingInterceptor)
         .build()
 
@@ -105,7 +130,7 @@ object ChatApiClient {
     val apiService: ChatApiService = retrofit.create(ChatApiService::class.java)
 
     /**
-     * Envía el mensaje transcrito por el adulto mayor hacia POST http://10.0.2.2:3000/api/chat.
+     * Envía el mensaje transcrito por el adulto mayor hacia POST {BASE_URL}api/chat.
      * `sessionId` debe ser el identificador único de la instalación (ver SessionIdProvider).
      */
     suspend fun sendChatMessage(

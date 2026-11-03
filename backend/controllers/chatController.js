@@ -20,9 +20,12 @@ const { GoogleGenAI, Type } = require("@google/genai");
 const {
   synthesizeSpeechWithEmotion,
   getProsodyForEmotion,
-  AFFECTIVE_PROSODY_MAP
+  calculateAudioDurationMs,
+  AFFECTIVE_PROSODY_MAP,
+  TTS_WORST_CASE_MS
 } = require("../services/ttsService");
 const { sessionStore } = require("../services/sessionStore");
+const { isCriticalRisk } = require("../services/emergencyDetector");
 
 const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
 const GEMINI_MODEL = (process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL).trim();
@@ -30,6 +33,9 @@ const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || "8000", 10);
 // Límite de tokens de salida. En modelos con "thinking" los tokens de razonamiento también
 // consumen este presupuesto: un valor demasiado bajo trunca el JSON y provoca fallback.
 const GEMINI_MAX_OUTPUT_TOKENS = parseInt(process.env.GEMINI_MAX_OUTPUT_TOKENS || "1024", 10);
+// Tiempo máximo total de una respuesta de /api/chat. Debe ser menor que el readTimeout
+// de la app Android (25 s en ChatApiClient.kt) para que la app no corte antes.
+const CHAT_RESPONSE_BUDGET_MS = parseInt(process.env.CHAT_RESPONSE_BUDGET_MS || "18000", 10);
 
 const EMOTION_CATEGORIES = [
   "POSITIVA",
@@ -815,7 +821,7 @@ function selectNonRepeatingVariation(session, category) {
 const EMERGENCY_SPOKEN_TEXT = "Te estoy escuchando, mantén la calma y no hagas esfuerzos. Lo que me cuentas puede ser urgente. Por favor, pide ayuda ahora mismo a una persona cercana o a tu cuidador.";
 const EMERGENCY_SCREEN_TEXT = "Pide ayuda a alguien cercano";
 
-const CRITICAL_EMERGENCY_REGEX =/(?:me quiero morir|quiero morir|no quiero vivir|acabar con mi vida|matarme|quitarme la vida|desaparecer para siempre|me tom(?:e|é) muchas pastillas|fuerte dolor en el pecho|dolor opresivo|me duele el pecho|no puedo respirar|me falta el aire|me ca[ií] y no puedo levantarme|no siento las piernas|se me durmi(?:o|ó) la mitad de la cara)/i;
+// Las frases de riesgo viven en services/emergencyDetector.js (replicadas en la app Android).
 
 /**
  * Patrones de prescripción médica. Se evalúan sobre el texto NORMALIZADO (sin tildes,
@@ -843,7 +849,7 @@ function containsMedicalPrescription(text) {
 }
 
 function evaluateInputGuardrails(text) {
-  if (CRITICAL_EMERGENCY_REGEX.test(text)) {
+  if (isCriticalRisk(text)) {
     return {
       triggered: true,
       reason: "critical_risk_keyword"
@@ -856,7 +862,7 @@ function sanitizeAndEnforceGuardrails(responseObj, userInput, fallbackCategory, 
   const sanitized = { ...responseObj };
 
   // 1. Red de seguridad de emergencia si el input contiene riesgo vital
-  if (CRITICAL_EMERGENCY_REGEX.test(userInput)) {
+  if (isCriticalRisk(userInput)) {
     sanitized.suggested_action = "emergency_alert";
     sanitized.user_emotion = "NEGATIVA_ANSIEDAD_PREOCUPACION";
     sanitized.screen_text = EMERGENCY_SCREEN_TEXT;
@@ -922,7 +928,7 @@ function sanitizeAndEnforceGuardrails(responseObj, userInput, fallbackCategory, 
 // 8. RESPUESTA DESDE EL BANCO DIVERSIFICADO (Anti-Repetición por Sesión)
 // =============================================================================
 function generateMockResponse(userInput, session, preDetectedCategory = null) {
-  if (CRITICAL_EMERGENCY_REGEX.test(userInput || "")) {
+  if (isCriticalRisk(userInput)) {
     return {
       spoken_text: EMERGENCY_SPOKEN_TEXT,
       screen_text: EMERGENCY_SCREEN_TEXT,
@@ -1082,6 +1088,7 @@ function validateSessionId(sessionId) {
 }
 
 async function handleChat(req, res, next) {
+  const requestStartedAt = Date.now();
   try {
     // Sin sessionId por defecto: un valor compartido mezclaría conversaciones de distintos usuarios
     const { message, sessionId } = req.body || {};
@@ -1171,13 +1178,28 @@ async function handleChat(req, res, next) {
     appendToSessionHistory(session, trimmedMessage, finalResponse.spoken_text);
     await persistSession(sessionId, session);
 
-    // 6. Síntesis de Voz Neural Gratuita (msedge-tts) con Modulación Afectiva y Reloj Maestro
-    const neuralTts = await synthesizeSpeechWithEmotion(
-      finalResponse.spoken_text,
-      finalResponse.user_emotion
-    );
-    finalResponse.audio_base64 = neuralTts.audio_base64;
-    finalResponse.audio_duration_ms = neuralTts.audio_duration_ms;
+    // 6. Síntesis de Voz Neural Gratuita (msedge-tts) con Modulación Afectiva y Reloj Maestro.
+    //    Si el peor caso del TTS excedería el presupuesto total, se omite: la app usa su TTS
+    //    local en lugar de agotar su tiempo de espera y mostrar otra respuesta.
+    const elapsedMs = Date.now() - requestStartedAt;
+    if (elapsedMs + TTS_WORST_CASE_MS <= CHAT_RESPONSE_BUDGET_MS) {
+      const neuralTts = await synthesizeSpeechWithEmotion(
+        finalResponse.spoken_text,
+        finalResponse.user_emotion
+      );
+      finalResponse.audio_base64 = neuralTts.audio_base64;
+      finalResponse.audio_duration_ms = neuralTts.audio_duration_ms;
+    } else {
+      console.warn(
+        `⏳ [Neural TTS Omitido] ${elapsedMs}ms ya consumidos; presupuesto=${CHAT_RESPONSE_BUDGET_MS}ms. Se delega al TTS local de Android.`
+      );
+      finalResponse.audio_base64 = null;
+      finalResponse.audio_duration_ms = calculateAudioDurationMs(
+        finalResponse.spoken_text,
+        null,
+        getProsodyForEmotion(finalResponse.user_emotion).rate
+      );
+    }
 
     // El audio viaja una sola vez, dentro de `data` (es lo que consume la app Android)
     return res.status(200).json({

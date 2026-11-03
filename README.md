@@ -122,8 +122,35 @@ Consulta [backend/README.md](backend/README.md) para más detalles sobre endpoin
 
 ---
 
-## 🔗 Integración y Conexión Local
+## 🔗 Integración y Conexión con el Backend
 
-Para comunicar la app Android con el backend local:
-- **En Emulador Android:** La app apunta a `http://10.0.2.2:3000/api/chat`.
-- **En Dispositivo Físico:** Configura la IP local de tu máquina de desarrollo (ejemplo: `http://192.168.1.X:3000/api/chat`) en `ChatApiClient.kt`.
+La URL del backend y el token de acceso se configuran en `local.properties` (no se versiona), sin tocar el código:
+
+```properties
+# Debug: por defecto http://10.0.2.2:3000/ (emulador). En un teléfono físico usa la IP de tu PC en la misma Wi-Fi.
+care.apiBaseUrl.debug=http://192.168.1.50:3000/
+# Release: obligatorio y solo HTTPS (el build release se detiene si falta)
+care.apiBaseUrl.release=https://tu-servidor.example/
+# Mismo valor que API_ACCESS_TOKEN en backend/.env
+care.apiToken=pega_aqui_el_token
+```
+
+- El tráfico HTTP sin cifrar solo está permitido en builds **debug** (`app/src/debug/AndroidManifest.xml`); release exige HTTPS.
+- La barra "Modo de prueba" para forzar estados y los logs completos de red solo aparecen en builds **debug**.
+
+## 🔐 Seguridad de la API
+
+- `API_ACCESS_TOKEN` (en `backend/.env`): token compartido que la app envía como `Authorization: Bearer <token>`. Es obligatorio con `NODE_ENV=production`; en desarrollo, si está vacío, la API acepta peticiones sin token y lo avisa en consola.
+- Límite de peticiones por IP: `CHAT_RATE_LIMIT_PER_MINUTE` (20) y `SESSION_RATE_LIMIT_PER_MINUTE` (30). Detrás de un proxy (ngrok, Render, Nginx) define `TRUST_PROXY=1` para que el límite sea por cliente y no global.
+- CORS desactivado salvo los orígenes declarados en `CORS_ORIGINS` (la app Android no lo necesita).
+- El token viaja dentro del APK: frena el uso casual o automatizado, pero no reemplaza una autenticación real por usuario.
+
+## ✅ Pruebas
+
+```bash
+# Backend (desde backend/)
+npm test
+# Android (desde la raíz)
+./gradlew :app:testDebugUnitTest
+```
+Las frases de posible emergencia existen en el backend (`services/emergencyDetector.js`) y en la app (`safety/EmergencyDetector.kt`); ambas suites usan los mismos casos de `backend/test/emergency-cases.json`.
