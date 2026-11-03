@@ -97,7 +97,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
     companion object {
         private const val TAG = "ChatbotViewModel"
 
-        // El audio neural ya llega ralentizado por la prosodia del backend (-8 % a -18 %):
+        // El audio neural ya llega algo ralentizado por la prosodia del backend (0 % a -10 %):
         // "Pausado" lo reproduce tal cual y "Normal" lo acelera ligeramente.
         private const val NEURAL_SPEED_SLOW = 1.0f
         private const val NEURAL_SPEED_NORMAL = 1.15f

@@ -9,6 +9,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxScope
 import androidx.compose.foundation.layout.Row
@@ -28,6 +29,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
@@ -51,6 +53,7 @@ private const val SPEAKING_WAVE_MAX_GROWTH = 0.25f
  * quien habla (complementa la voz con una señal visual). El espacio de las ondas se reserva
  * siempre, así la pantalla no salta al empezar o terminar de hablar.
  * `badge` permite añadir un distintivo en la esquina inferior (por ejemplo, la alerta de emergencia).
+ * Con `onClick` el avatar se puede tocar (TalkBack anuncia `onClickLabel`).
  */
 @Composable
 fun AssistantAvatarBadge(
@@ -61,11 +64,22 @@ fun AssistantAvatarBadge(
     isSpeaking: Boolean = false,
     waveColor: Color = AvatarSpeakingWave,
     borderColor: Color = CardSurface,
+    onClick: (() -> Unit)? = null,
+    onClickLabel: String? = null,
     badge: (@Composable BoxScope.() -> Unit)? = null
 ) {
     Box(
         modifier = modifier
             .size(avatarSize * (1f + SPEAKING_WAVE_MAX_GROWTH))
+            .then(
+                if (onClick != null) {
+                    Modifier
+                        .clip(CircleShape)
+                        .clickable(onClickLabel = onClickLabel, role = Role.Button, onClick = onClick)
+                } else {
+                    Modifier
+                }
+            )
             .semantics { this.contentDescription = contentDescription },
         contentAlignment = Alignment.Center
     ) {

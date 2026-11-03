@@ -23,10 +23,11 @@ const {
   getProsodyForEmotion,
   calculateAudioDurationMs,
   hasCachedAudio,
+  prewarmTts,
   resolveCompanion,
   DEFAULT_COMPANION,
   AFFECTIVE_PROSODY_MAP,
-  TTS_WORST_CASE_MS
+  TTS_MIN_ATTEMPT_MS
 } = require("../services/ttsService");
 const { sessionStore } = require("../services/sessionStore");
 const { isCriticalRisk } = require("../services/emergencyDetector");
@@ -1245,6 +1246,9 @@ async function handleChat(req, res, next) {
       });
     }
 
+    // Edge cierra el WebSocket tras 20-60 s sin uso: se reabre ahora, mientras Gemini piensa
+    prewarmTts(companion);
+
     const trimmedMessage = message.trim();
     const session = await loadSession(sessionId);
 
@@ -1325,15 +1329,16 @@ async function handleChat(req, res, next) {
     await persistSession(sessionId, session);
 
     // 6. Síntesis de Voz Neural Gratuita (msedge-tts) con Modulación Afectiva y Reloj Maestro.
-    //    Si el peor caso del TTS excedería el presupuesto total, se omite: la app usa su TTS
-    //    local en lugar de agotar su tiempo de espera y mostrar otra respuesta.
+    //    El TTS puede reintentar, pero nunca pasa del presupuesto total: si no queda plazo para
+    //    un intento, se omite y la app usa su TTS local en lugar de agotar su tiempo de espera.
     const elapsedMs = Date.now() - requestStartedAt;
+    const ttsDeadline = requestStartedAt + CHAT_RESPONSE_BUDGET_MS;
     const audioIsCached = hasCachedAudio(finalResponse.spoken_text, finalResponse.user_emotion, companion);
-    if (audioIsCached || elapsedMs + TTS_WORST_CASE_MS <= CHAT_RESPONSE_BUDGET_MS) {
+    if (audioIsCached || ttsDeadline - Date.now() >= TTS_MIN_ATTEMPT_MS) {
       const neuralTts = await synthesizeSpeechWithEmotion(
         finalResponse.spoken_text,
         finalResponse.user_emotion,
-        companion
+        { companion, deadline: ttsDeadline }
       );
       finalResponse.audio_base64 = neuralTts.audio_base64;
       finalResponse.audio_duration_ms = neuralTts.audio_duration_ms;

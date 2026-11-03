@@ -14,6 +14,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -21,6 +22,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -28,15 +30,19 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -69,6 +75,7 @@ import uq.seminario.projects3.avatar.AssistantAvatar
 import uq.seminario.projects3.ui.components.AppNavigationHeader
 import uq.seminario.projects3.ui.components.AssistantAvatarBadge
 import uq.seminario.projects3.ui.theme.BeigeBackground
+import uq.seminario.projects3.ui.theme.CardSurface
 import uq.seminario.projects3.ui.theme.DarkText
 import uq.seminario.projects3.ui.theme.ListeningTerracotta
 import uq.seminario.projects3.ui.theme.MutedDarkText
@@ -83,6 +90,8 @@ private val VOICE_BAR_WEIGHTS = floatArrayOf(0.55f, 0.85f, 1f, 0.85f, 0.55f)
 private const val VOICE_BAR_MIN_FRACTION = 0.2f
 // Cuánto crece el halo detrás del botón con la voz más fuerte (+30 %)
 private const val VOICE_HALO_MAX_GROWTH = 0.3f
+// Alto del botón "Cambiar acompañante" (y del hueco que lo sustituye al escuchar)
+private val CHANGE_AVATAR_BUTTON_HEIGHT = 56.dp
 
 /**
  * Pantalla 1: Pantalla de Inicio / Escucha (VoiceInputScreen)
@@ -91,7 +100,8 @@ private const val VOICE_HALO_MAX_GROWTH = 0.3f
  * - Barra superior `AppNavigationHeader`:
  *     * En `Idle`: muestra botón discreto "Salir" en la esquina superior derecha.
  *     * En `Listening`: muestra "← Atrás" e "Inicio" para cancelar o regresar con seguridad.
- * - Avatar del acompañante elegido bajo la barra; en `Idle`, "Cambiar acompañante" abre su elección.
+ * - Avatar del acompañante elegido bajo la barra; en `Idle`, el botón "Cambiar acompañante"
+ *   (o tocar el avatar) abre su elección.
  * - Tipografía amplia (>=28sp títulos, >=20sp cuerpo).
  * - Botón central circular masivo (170dp) con confirmación háptica.
  * - En `Listening`, las barras del icono y el halo del botón se mueven con el volumen de la voz
@@ -139,6 +149,12 @@ fun VoiceInputScreen(
 
                 Spacer(modifier = Modifier.height(4.dp))
 
+                val changeAvatar = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onChangeAvatarClick()
+                }
+
+                // En inicio, tocar el avatar también abre la elección (Equivalencia con el botón)
                 AssistantAvatarBadge(
                     avatar = avatar,
                     avatarSize = 104.dp,
@@ -146,31 +162,46 @@ fun VoiceInputScreen(
                         "${avatar.title} te está escuchando"
                     } else {
                         avatar.title
-                    }
+                    },
+                    onClick = if (isListening) null else changeAvatar,
+                    onClickLabel = "cambiar de acompañante"
                 )
 
                 // "Cambiar acompañante" solo en inicio; al escuchar se reserva su alto para que
                 // el botón del micrófono no salte durante la transición entre ambas pantallas
                 if (isListening) {
-                    Spacer(modifier = Modifier.height(48.dp))
+                    Spacer(modifier = Modifier.height(CHANGE_AVATAR_BUTTON_HEIGHT))
                 } else {
-                    TextButton(
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                            onChangeAvatarClick()
-                        },
-                        modifier = Modifier.heightIn(min = 48.dp)
+                    OutlinedButton(
+                        onClick = changeAvatar,
+                        modifier = Modifier.heightIn(min = CHANGE_AVATAR_BUTTON_HEIGHT),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.outlinedButtonColors(
+                            containerColor = CardSurface,
+                            contentColor = PrimaryDarkGreen
+                        ),
+                        border = BorderStroke(2.dp, PrimaryDarkGreen),
+                        contentPadding = PaddingValues(horizontal = 18.dp, vertical = 10.dp)
                     ) {
+                        Icon(
+                            imageVector = Icons.Default.SwapHoriz,
+                            contentDescription = null,
+                            tint = PrimaryDarkGreen,
+                            modifier = Modifier.size(26.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Cambiar acompañante",
                             style = MaterialTheme.typography.labelLarge.copy(
-                                fontSize = 18.sp,
-                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 19.sp,
+                                fontWeight = FontWeight.Bold,
                                 color = PrimaryDarkGreen
                             )
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.height(8.dp))
 
                 HeaderGreetingSection()
             }

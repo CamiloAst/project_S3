@@ -7,8 +7,11 @@
  * - Una voz por acompañante elegido en la app: compañera (es-CO-SalomeNeural, o es-MX-DaliaNeural
  *   si falla) y compañero (es-CO-GonzaloNeural, o es-MX-JorgeNeural).
  * - Modulación afectiva de prosodia (rate y pitch) según user_emotion.
- * - Timeout fail-fast (< 2000 ms): si falla la red o el servicio, retorna
- *   audio_base64: null de inmediato para que Android active su TTS local.
+ * - Edge gratis cierra el WebSocket tras 20-60 s sin uso y a veces tarda varios segundos en
+ *   reconectar o corta el audio a mitad. Por eso: se reabre la conexión mientras Gemini piensa
+ *   (prewarmTts), cada intento tiene plazos propios y, si falla, se reintenta una vez con una
+ *   conexión nueva mientras quede plazo. Solo si todo falla se devuelve audio_base64: null y
+ *   Android usa su TTS local (más robótico).
  */
 
 const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts");
@@ -29,37 +32,49 @@ const DEFAULT_COMPANION = "female";
 // EDGE_TTS_ENABLED=false desactiva la voz neural (pruebas automáticas o desarrollo sin red):
 // las respuestas llegan con audio_base64=null y la app usa su TTS local.
 const EDGE_TTS_ENABLED = process.env.EDGE_TTS_ENABLED !== "false";
-const TTS_FORMAT = OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3;
-const TTS_CONNECTION_TIMEOUT_MS = 1900; // Si falla la conexión WebSocket, aborta en < 2s
-const TTS_FAILFAST_FIRST_BYTE_MS = 1950; // Si el stream no emite audio tras enviar SSML, aborta en < 2s
-const TTS_MAX_STREAM_MS = 6000; // Límite total cuando ya están llegando chunks de audio activos
-// Peor caso de una síntesis (conexión + stream completo); lo usa el presupuesto de /api/chat
-const TTS_WORST_CASE_MS = TTS_CONNECTION_TIMEOUT_MS + TTS_MAX_STREAM_MS;
+// 96 kbps (el máximo que admite Edge gratis) suena más limpio que 48 kbps
+const TTS_FORMAT = OUTPUT_FORMAT.AUDIO_24KHZ_96KBITRATE_MONO_MP3;
+const TTS_BITRATE_KBPS = 96;
+const TTS_CONNECTION_TIMEOUT_MS = 3500; // Conexión WebSocket (una reconexión normal tarda ~1 s)
+const TTS_FIRST_BYTE_TIMEOUT_MS = 3000; // Sin audio (o sin actividad) tras enviar el texto
+const TTS_MAX_STREAM_MS = 8000; // Límite de un intento completo
+const TTS_MAX_ATTEMPTS = 2; // Un reintento con conexión nueva
+const TTS_MIN_ATTEMPT_MS = 2500; // No se empieza un intento con menos plazo que esto
 
 /**
  * Mapa de modulación prosódica afectiva según la emoción detectada del adulto mayor.
+ * Ralentizaciones suaves: más de un 10 % hace que la voz neural suene estirada y robótica.
  */
 const AFFECTIVE_PROSODY_MAP = {
   NEGATIVA_TRISTEZA_SOLEDAD: {
-    rate: "-15%",
-    pitch: "-2Hz"
+    rate: "-8%",
+    pitch: "-1Hz"
   },
   NEGATIVA_ANSIEDAD_PREOCUPACION: {
-    rate: "-18%",
-    pitch: "-3Hz"
+    rate: "-10%",
+    pitch: "-2Hz"
   },
   POSITIVA: {
-    rate: "-8%",
-    pitch: "+2Hz"
+    rate: "0%",
+    pitch: "+1Hz"
   },
   NEUTRA: {
-    rate: "-12%",
+    rate: "-5%",
     pitch: "0Hz"
   },
   AMBIGUA: {
-    rate: "-12%",
+    rate: "-5%",
     pitch: "0Hz"
   }
+};
+
+// Contadores para GET /api/health: permiten ver cuántas veces falla la voz neural y por qué
+const ttsStats = {
+  neural: 0,
+  retries: 0,
+  failures: 0,
+  skipped: 0,
+  lastError: null
 };
 
 // Caché LRU ligera en memoria para respuestas frecuentes (evita latencia de red repetida)
@@ -106,7 +121,7 @@ function escapeSsmlText(text) {
 
 /**
  * Calcula la duración estimada del audio en milisegundos (Reloj Maestro de Sincronía).
- * - Si existe el buffer MP3 (48 kbps mono = 6 bytes por ms), calcula la duración exacta.
+ * - Si existe el buffer MP3 (tasa constante TTS_BITRATE_KBPS), calcula la duración exacta.
  * - Si no hay buffer (fallback), estima según conteo de palabras y factor de velocidad.
  *
  * @param {string} spokenText Texto hablado.
@@ -116,8 +131,8 @@ function escapeSsmlText(text) {
  */
 function calculateAudioDurationMs(spokenText, audioBuffer = null, rateStr = "-12%") {
   if (audioBuffer && Buffer.isBuffer(audioBuffer) && audioBuffer.length > 0) {
-    // 48 kbps = 48000 bits/s = 6000 bytes/s = 6 bytes/ms
-    const mp3DurationMs = Math.round((audioBuffer.length * 8) / 48);
+    // kbps = bits por milisegundo: 96 kbps = 12 bytes/ms
+    const mp3DurationMs = Math.round((audioBuffer.length * 8) / TTS_BITRATE_KBPS);
     return Math.max(800, mp3DurationMs);
   }
 
@@ -145,7 +160,7 @@ function getTtsEntry(companion) {
   const client = new MsEdgeTTS({
     enableLogger: false,
     connectionTimeoutMs: TTS_CONNECTION_TIMEOUT_MS,
-    synthesisTimeoutMs: TTS_FAILFAST_FIRST_BYTE_MS
+    synthesisTimeoutMs: TTS_FIRST_BYTE_TIMEOUT_MS
   });
   const entry = { voiceName: profile.primary, readyPromise: null };
 
@@ -170,12 +185,26 @@ function dropTtsEntry(companion, entry) {
 }
 
 /**
- * Ejecuta una síntesis de stream hacia Buffer MP3 usando MsEdgeTTS.
- * Aplica un watchdog fail-fast (< 2 segundos) hasta recibir el primer paquete de audio:
- * si no hay respuesta o falla la red, rechaza en < 1.9s para activar el fallback TTS en Android.
+ * Reabre en segundo plano la conexión del acompañante si Edge la cerró por inactividad.
+ * handleChat la llama al recibir el mensaje, así la reconexión ocurre mientras Gemini piensa.
  */
-async function synthesizeBufferOnce(spokenText, prosody, companion) {
+function prewarmTts(companion) {
+  if (!EDGE_TTS_ENABLED) return;
+  const voiceCompanion = resolveCompanion(companion);
+  const entry = getTtsEntry(voiceCompanion);
+  entry.readyPromise
+    // setMetadata no hace nada si el WebSocket sigue abierto; si está cerrado, reconecta
+    .then((client) => client.setMetadata(entry.voiceName, TTS_FORMAT))
+    .catch(() => dropTtsEntry(voiceCompanion, entry));
+}
+
+/**
+ * Un intento de síntesis hacia Buffer MP3 usando MsEdgeTTS, con plazos propios para la
+ * conexión, el primer audio y el total (nunca más allá de `deadline`).
+ */
+async function synthesizeBufferOnce(spokenText, prosody, companion, deadline) {
   const entry = getTtsEntry(companion);
+  const attemptBudgetMs = Math.min(TTS_MAX_STREAM_MS, Math.max(0, deadline - Date.now()));
   let firstChunkTimer = null;
   let totalStreamTimer = null;
 
@@ -204,13 +233,14 @@ async function synthesizeBufferOnce(spokenText, prosody, companion) {
       reject(err);
     };
 
-    // 1. Timeout fail-fast (< 2s) durante la conexión inicial si no hay red
+    // Límite del intento completo (conexión + audio), acotado por el plazo de la petición
+    totalStreamTimer = setTimeout(() => {
+      failFast(new Error(`Timeout total del intento (${attemptBudgetMs}ms) en Edge TTS`));
+    }, attemptBudgetMs);
+
+    // 1. Plazo para tener la conexión inicial lista
     firstChunkTimer = setTimeout(() => {
-      failFast(
-        new Error(
-          `Timeout fail-fast de conexión (${TTS_CONNECTION_TIMEOUT_MS}ms) con Edge TTS`
-        )
-      );
+      failFast(new Error(`Timeout de conexión (${TTS_CONNECTION_TIMEOUT_MS}ms) con Edge TTS`));
     }, TTS_CONNECTION_TIMEOUT_MS);
 
     entry.readyPromise
@@ -220,18 +250,10 @@ async function synthesizeBufferOnce(spokenText, prosody, companion) {
           clearTimeout(firstChunkTimer);
         }
 
-        // 2. Reiniciar watchdog fail-fast (< 2s) para el primer chunk de síntesis SSML
+        // 2. Plazo para el primer audio (incluye reconectar si Edge cerró el WebSocket por inactividad)
         firstChunkTimer = setTimeout(() => {
-          failFast(
-            new Error(
-              `Timeout fail-fast (${TTS_FAILFAST_FIRST_BYTE_MS}ms) sin recibir audio de Edge TTS`
-            )
-          );
-        }, TTS_FAILFAST_FIRST_BYTE_MS);
-
-        totalStreamTimer = setTimeout(() => {
-          failFast(new Error(`Timeout total de stream (${TTS_MAX_STREAM_MS}ms) en Edge TTS`));
-        }, TTS_MAX_STREAM_MS);
+          failFast(new Error(`Timeout (${TTS_FIRST_BYTE_TIMEOUT_MS}ms) sin recibir audio de Edge TTS`));
+        }, TTS_FIRST_BYTE_TIMEOUT_MS);
 
         const cleanSsmlText = escapeSsmlText(spokenText);
 
@@ -266,17 +288,9 @@ async function synthesizeBufferOnce(spokenText, prosody, companion) {
           resolve(fullBuffer);
         });
 
+        // "close" sin "end" = el audio quedó cortado: mejor reintentar que entregar media frase
         audioStream.once("close", () => {
-          if (settled) return;
-          settled = true;
-          cleanupTimers();
-          const fullBuffer = Buffer.concat(chunks);
-          if (fullBuffer.length > 0) {
-            resolve(fullBuffer);
-          } else {
-            dropTtsEntry(companion, entry);
-            reject(new Error("El stream de Edge TTS se cerró sin datos."));
-          }
+          failFast(new Error("El stream de Edge TTS se cerró antes de terminar el audio."));
         });
 
         audioStream.once("error", (err) => {
@@ -302,15 +316,21 @@ function hasCachedAudio(spokenText, userEmotion = "NEUTRA", companion = DEFAULT_
 
 /**
  * Convierte `spoken_text` en audio MP3 codificado en Base64 con modulación afectiva.
- * Cumple estricto fail-fast (< 2 segundos): si ocurre cualquier error o demora,
- * devuelve `audio_base64: null` junto con `audio_duration_ms` estimado.
+ * Si un intento falla (conexión lenta, audio cortado) se reintenta una vez con una conexión
+ * nueva mientras quede plazo hasta `deadline`. Si no se logra, devuelve `audio_base64: null`
+ * junto con `audio_duration_ms` estimado y la app usa su TTS local.
  *
  * @param {string} spokenText Texto que pronunciará el asistente.
  * @param {string} userEmotion Emoción detectada (POSITIVA, NEGATIVA_TRISTEZA_SOLEDAD, etc.).
- * @param {string} companion Acompañante elegido en la app ("female" | "male").
+ * @param {{ companion?: string, deadline?: number }} options Acompañante ("female" | "male") y
+ *   momento límite (ms epoch) para entregar el audio; por defecto, un intento completo.
  * @returns {Promise<{ audio_base64: string | null, audio_duration_ms: number, voice: string, prosody: { rate: string, pitch: string } }>}
  */
-async function synthesizeSpeechWithEmotion(spokenText, userEmotion = "NEUTRA", companion = DEFAULT_COMPANION) {
+async function synthesizeSpeechWithEmotion(
+  spokenText,
+  userEmotion = "NEUTRA",
+  { companion = DEFAULT_COMPANION, deadline = Date.now() + TTS_MAX_STREAM_MS } = {}
+) {
   const voiceCompanion = resolveCompanion(companion);
   const prosody = getProsodyForEmotion(userEmotion);
   const fallbackDurationMs = calculateAudioDurationMs(spokenText, null, prosody.rate);
@@ -338,48 +358,74 @@ async function synthesizeSpeechWithEmotion(spokenText, userEmotion = "NEUTRA", c
   }
 
   const startTime = Date.now();
+  let lastError = null;
 
-  try {
-    const mp3Buffer = await synthesizeBufferOnce(trimmedText, prosody, voiceCompanion);
+  for (let attempt = 1; attempt <= TTS_MAX_ATTEMPTS; attempt++) {
+    if (deadline - Date.now() < TTS_MIN_ATTEMPT_MS) break;
+    if (attempt > 1) ttsStats.retries++;
 
-    const audioBase64 = mp3Buffer.toString("base64");
-    const durationMs = calculateAudioDurationMs(trimmedText, mp3Buffer, prosody.rate);
-    const elapsedMs = Date.now() - startTime;
+    try {
+      const mp3Buffer = await synthesizeBufferOnce(trimmedText, prosody, voiceCompanion, deadline);
 
-    console.log(
-      `🎙️  [Neural TTS] Voz=${voiceNameFor(voiceCompanion)} | Emoción=${userEmotion} (rate=${prosody.rate}, pitch=${prosody.pitch}) | ` +
-        `Duración=${durationMs}ms | Generado en ${elapsedMs}ms (${mp3Buffer.length} bytes)`
-    );
+      const audioBase64 = mp3Buffer.toString("base64");
+      const durationMs = calculateAudioDurationMs(trimmedText, mp3Buffer, prosody.rate);
+      const elapsedMs = Date.now() - startTime;
+      ttsStats.neural++;
 
-    if (audioCache.size >= MAX_AUDIO_CACHE_ENTRIES) {
-      const oldestKey = audioCache.keys().next().value;
-      if (oldestKey) audioCache.delete(oldestKey);
+      console.log(
+        `🎙️  [Neural TTS] Voz=${voiceNameFor(voiceCompanion)} | Emoción=${userEmotion} (rate=${prosody.rate}, pitch=${prosody.pitch}) | ` +
+          `Duración=${durationMs}ms | Generado en ${elapsedMs}ms (${mp3Buffer.length} bytes, intento ${attempt})`
+      );
+
+      if (audioCache.size >= MAX_AUDIO_CACHE_ENTRIES) {
+        const oldestKey = audioCache.keys().next().value;
+        if (oldestKey) audioCache.delete(oldestKey);
+      }
+      audioCache.set(cacheKey, {
+        audio_base64: audioBase64,
+        audio_duration_ms: durationMs
+      });
+
+      return {
+        audio_base64: audioBase64,
+        audio_duration_ms: durationMs,
+        voice: voiceNameFor(voiceCompanion),
+        prosody
+      };
+    } catch (err) {
+      lastError = err;
+      console.warn(`🔁 [Neural TTS] Intento ${attempt}/${TTS_MAX_ATTEMPTS} falló tras ${Date.now() - startTime}ms: ${err.message}`);
     }
-    audioCache.set(cacheKey, {
-      audio_base64: audioBase64,
-      audio_duration_ms: durationMs
-    });
-
-    return {
-      audio_base64: audioBase64,
-      audio_duration_ms: durationMs,
-      voice: voiceNameFor(voiceCompanion),
-      prosody
-    };
-  } catch (err) {
-    const elapsedMs = Date.now() - startTime;
-    console.warn(
-      `⚠️  [Neural TTS Fallback] No se pudo generar audio neural tras ${elapsedMs}ms (${err.message}). ` +
-        `Devolviendo audio_base64: null para respaldo TTS local en Android.`
-    );
-
-    return {
-      audio_base64: null,
-      audio_duration_ms: fallbackDurationMs,
-      voice: voiceNameFor(voiceCompanion),
-      prosody
-    };
   }
+
+  const elapsedMs = Date.now() - startTime;
+  const reason = lastError ? lastError.message : "sin plazo suficiente para intentarlo";
+  if (lastError) {
+    ttsStats.failures++;
+  } else {
+    ttsStats.skipped++;
+  }
+  ttsStats.lastError = { message: String(reason).slice(0, 300), at: new Date().toISOString() };
+  console.warn(
+    `⚠️  [Neural TTS Fallback] Sin audio neural tras ${elapsedMs}ms (${reason}). ` +
+      `Devolviendo audio_base64: null para respaldo TTS local en Android.`
+  );
+
+  return {
+    audio_base64: null,
+    audio_duration_ms: fallbackDurationMs,
+    voice: voiceNameFor(voiceCompanion),
+    prosody
+  };
+}
+
+/** Estado de la voz neural para GET /api/health. */
+function getTtsStatus() {
+  return {
+    enabled: EDGE_TTS_ENABLED,
+    voices: Object.fromEntries(Object.keys(VOICE_PROFILES).map((c) => [c, voiceNameFor(c)])),
+    stats: { ...ttsStats }
+  };
 }
 
 // Precalentar en segundo plano la conexión de cada acompañante (sin bloquear el arranque)
@@ -404,5 +450,7 @@ module.exports = {
   calculateAudioDurationMs,
   synthesizeSpeechWithEmotion,
   hasCachedAudio,
-  TTS_WORST_CASE_MS
+  prewarmTts,
+  getTtsStatus,
+  TTS_MIN_ATTEMPT_MS
 };
