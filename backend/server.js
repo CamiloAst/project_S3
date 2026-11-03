@@ -16,6 +16,7 @@ const {
   getAiStatus,
   sessionStore
 } = require("./controllers/chatController");
+const { getTtsStatus } = require("./services/ttsService");
 const {
   requireApiToken,
   chatRateLimiter,
@@ -77,7 +78,9 @@ const healthHandler = (req, res) => {
     timestamp: new Date().toISOString(),
     sessionStore: sessionStore.kind,
     authRequired: isTokenRequired(),
-    aiProvider: getAiStatus()
+    aiProvider: getAiStatus(),
+    // Voz neural: neural = audios entregados, retries/failures/skipped = intentos fallidos o sin plazo
+    tts: getTtsStatus()
   });
 };
 
