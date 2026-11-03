@@ -42,7 +42,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import uq.seminario.projects3.avatar.AssistantAvatar
 import uq.seminario.projects3.ui.components.AppNavigationHeader
+import uq.seminario.projects3.ui.components.AssistantAvatarBadge
+import uq.seminario.projects3.ui.components.AvatarCornerBadge
 import uq.seminario.projects3.ui.components.BasicControlsBar
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.CardSurface
@@ -57,7 +60,7 @@ import uq.seminario.projects3.ui.theme.ProjectS3Theme
  *
  * Se muestra cuando el STT no detecta voz clara o hay ruido de fondo.
  * - Barra superior `AppNavigationHeader` con "← Atrás" e "🏠 Inicio".
- * - Centro con ícono de lupa amigable y mensaje claro (>=28sp).
+ * - Centro con el avatar del acompañante (con distintivo de lupa) y mensaje claro (>=28sp).
  * - Footer limpio con controles de lectura ("Pausar lectura / Continuar lectura" y "Repetir") + "Volver a hablar".
  */
 @Composable
@@ -66,6 +69,7 @@ fun RepairScreen(
     onRetryClick: () -> Unit,
     onBackToHomeClick: () -> Unit,
     modifier: Modifier = Modifier,
+    avatar: AssistantAvatar = AssistantAvatar.DEFAULT,
     isPaused: Boolean = false,
     onBackClick: () -> Unit = onBackToHomeClick,
     onTogglePauseClick: () -> Unit = {},
@@ -127,25 +131,22 @@ fun RepairScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(106.dp)
-                            .clip(CircleShape)
-                            .background(CardSurface)
-                            .semantics {
-                                contentDescription = "Icono de búsqueda y escucha"
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = null,
-                            tint = ListeningTerracotta,
-                            modifier = Modifier.size(60.dp)
-                        )
-                    }
+                    // El acompañante pide repetir; la lupa recuerda que no entendió bien
+                    AssistantAvatarBadge(
+                        avatar = avatar,
+                        avatarSize = 112.dp,
+                        isSpeaking = !isPaused,
+                        contentDescription = "${avatar.title} no te entendió bien",
+                        badge = {
+                            AvatarCornerBadge(
+                                icon = Icons.Default.Search,
+                                iconTint = ListeningTerracotta,
+                                backgroundColor = CardSurface
+                            )
+                        }
+                    )
 
-                    Spacer(modifier = Modifier.height(24.dp))
+                    Spacer(modifier = Modifier.height(14.dp))
 
                     Text(
                         text = message,

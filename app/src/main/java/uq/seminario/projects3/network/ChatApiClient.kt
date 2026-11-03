@@ -23,7 +23,10 @@ data class ChatRequest(
     @SerializedName("sessionId")
     val sessionId: String,
     @SerializedName("message")
-    val message: String
+    val message: String,
+    // Acompañante elegido ("female" | "male"): fija la voz neural y el género del asistente
+    @SerializedName("companion")
+    val companion: String
 )
 
 /**
@@ -178,15 +181,18 @@ object ChatApiClient {
     /**
      * Envía el mensaje transcrito por el adulto mayor hacia POST {BASE_URL}api/chat.
      * `sessionId` debe ser el identificador único de la instalación (ver SessionIdProvider).
+     * `companion` es el valor de la API del acompañante elegido (`AssistantAvatar.apiValue`).
      */
     suspend fun sendChatMessage(
         message: String,
-        sessionId: String
+        sessionId: String,
+        companion: String
     ): Result<ChatResponse> = withContext(Dispatchers.IO) {
         try {
             val request = ChatRequest(
                 sessionId = sessionId,
-                message = message
+                message = message,
+                companion = companion
             )
             val response = apiService.sendMessage(request).toChatResponse(sessionId)
             if (response != null) {

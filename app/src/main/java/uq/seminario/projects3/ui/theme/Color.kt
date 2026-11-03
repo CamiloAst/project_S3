@@ -33,3 +33,6 @@ val SereneWarmCardSurface = Color(0xFFFFFBF5)
 val SereneRecommendationSurface = Color(0xFFE7F0EA)
 val SereneRecommendationBorder = Color(0xFFB7D1C0)
 val SereneCalmAccent = Color(0xFF2B5B46)
+
+// Acompañante (avatar): ondas lavanda, a juego con el fondo de las imágenes, mientras habla
+val AvatarSpeakingWave = Color(0xFF7C6BB4)

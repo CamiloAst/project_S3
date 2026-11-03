@@ -73,6 +73,10 @@ class AudioEngine(
     @Volatile
     private var currentSpeechRate: Float = SPEECH_RATE_SLOW
 
+    // Tono del TTS local: depende del acompañante elegido (ver setVoicePitch)
+    @Volatile
+    private var voicePitch: Float = DEFAULT_WARM_PITCH
+
     @Volatile
     private var isVoiceMuted: Boolean = false
 
@@ -282,7 +286,7 @@ class AudioEngine(
             val tts = textToSpeech
             if (tts != null) {
                 configureHighQualitySpanishVoice(tts)
-                tts.setPitch(DEFAULT_WARM_PITCH)
+                tts.setPitch(voicePitch)
                 tts.setSpeechRate(0.85f)
                 currentSpeechRate = 0.85f
             }
@@ -397,8 +401,16 @@ class AudioEngine(
             Log.w("AudioEngine", "No se pudo inspeccionar tts.voices; usando configuración base en español", e)
         }
 
-        tts.setPitch(DEFAULT_WARM_PITCH)
+        tts.setPitch(voicePitch)
         tts.setSpeechRate(0.85f)
+    }
+
+    /**
+     * Tono del TTS local según el acompañante elegido (`AssistantAvatar.localTtsPitch`).
+     * Se aplica en la siguiente lectura; puede llamarse antes de que el motor esté listo.
+     */
+    fun setVoicePitch(pitch: Float) {
+        voicePitch = pitch
     }
 
     /**
@@ -427,7 +439,7 @@ class AudioEngine(
             return
         }
 
-        textToSpeech?.setPitch(DEFAULT_WARM_PITCH)
+        textToSpeech?.setPitch(voicePitch)
         textToSpeech?.setSpeechRate(currentSpeechRate)
         val utteranceId = "chatbot_speech_${System.currentTimeMillis()}"
         activeUtteranceId = utteranceId
@@ -458,7 +470,7 @@ class AudioEngine(
             return
         }
 
-        textToSpeech?.setPitch(DEFAULT_WARM_PITCH)
+        textToSpeech?.setPitch(voicePitch)
         textToSpeech?.setSpeechRate(currentSpeechRate)
         val utteranceId = "chatbot_repeat_${System.currentTimeMillis()}"
         activeUtteranceId = utteranceId

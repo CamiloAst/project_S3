@@ -21,9 +21,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -50,7 +48,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import uq.seminario.projects3.avatar.AssistantAvatar
 import uq.seminario.projects3.ui.components.AppNavigationHeader
+import uq.seminario.projects3.ui.components.AssistantAvatarBadge
 import uq.seminario.projects3.ui.components.BasicControlsBar
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.CardSurface
@@ -71,6 +71,7 @@ private const val SERENE_RECOMMENDATION_TITLE = "Un lugar sereno para respirar c
  *
  * Modelo CARE: Complementariedad (la voz lee `spoken_text` y la pantalla muestra un resumen distinto):
  * - Barra superior `AppNavigationHeader` con "← Atrás" e "🏠 Inicio".
+ * - El avatar del acompañante "habla": ondas a su alrededor mientras suena la voz.
  * - Muestra únicamente `screen_text` en pantalla para evitar sobrecarga cognitiva mientras TTS lee `spoken_text`.
  * - Footer limpio acorde a los mockups con "Pausar lectura / Continuar lectura" (y "Repetir") + "Hablar".
  */
@@ -80,6 +81,7 @@ fun BotResponseScreen(
     isPaused: Boolean,
     onTogglePause: () -> Unit,
     modifier: Modifier = Modifier,
+    avatar: AssistantAvatar = AssistantAvatar.DEFAULT,
     userEmotion: String = "NEUTRA",
     onRepeatClick: () -> Unit = {},
     onBackClick: () -> Unit = {},
@@ -125,7 +127,10 @@ fun BotResponseScreen(
 
                 Spacer(modifier = Modifier.height(6.dp))
 
-                BotHeaderSection(isAffectiveSupport = isAffectiveSupport)
+                BotHeaderSection(
+                    avatar = avatar,
+                    isAffectiveSupport = isAffectiveSupport
+                )
             }
 
             // Contenedor central con scroll para apoyo visual y tarjeta de texto breve (screen_text)
@@ -143,12 +148,18 @@ fun BotResponseScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    SupportCompanionBadge(
+                    AssistantAvatarBadge(
+                        avatar = avatar,
                         isSpeaking = !isPaused,
-                        isAffectiveSupport = isAffectiveSupport
+                        borderColor = if (isAffectiveSupport) SereneWarmCardSurface else CardSurface,
+                        contentDescription = if (!isPaused) {
+                            "${avatar.title} está hablando en voz alta"
+                        } else {
+                            "La voz de ${avatar.title.lowercase()} está en pausa"
+                        }
                     )
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     ResponseCard(
                         speechText = speechText,
@@ -175,6 +186,7 @@ fun BotResponseScreen(
 
 @Composable
 private fun BotHeaderSection(
+    avatar: AssistantAvatar,
     isAffectiveSupport: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -193,42 +205,13 @@ private fun BotHeaderSection(
         )
         Spacer(modifier = Modifier.width(10.dp))
         Text(
-            text = if (isAffectiveSupport) "Tu asistente te acompaña" else "Tu asistente",
+            text = if (isAffectiveSupport) "${avatar.title} te acompaña" else avatar.title,
             style = MaterialTheme.typography.titleMedium.copy(
                 fontSize = 23.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MutedDarkText
             ),
             textAlign = TextAlign.Center
-        )
-    }
-}
-
-@Composable
-private fun SupportCompanionBadge(
-    isSpeaking: Boolean,
-    isAffectiveSupport: Boolean = false,
-    modifier: Modifier = Modifier
-) {
-    Box(
-        modifier = modifier
-            .size(78.dp)
-            .clip(CircleShape)
-            .background(if (isAffectiveSupport) SereneWarmCardSurface else CardSurface)
-            .semantics {
-                contentDescription = if (isSpeaking) {
-                    "El asistente está hablando en voz alta"
-                } else {
-                    "La lectura del asistente está en pausa"
-                }
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        Icon(
-            imageVector = if (isSpeaking) Icons.AutoMirrored.Filled.VolumeUp else Icons.Default.RecordVoiceOver,
-            contentDescription = null,
-            tint = if (isAffectiveSupport) SereneCalmAccent else PrimaryDarkGreen,
-            modifier = Modifier.size(42.dp)
         )
     }
 }
@@ -410,7 +393,7 @@ private fun BotResponseFooterSection(
 private fun BotResponseScreenSpeakingPreview() {
     ProjectS3Theme {
         BotResponseScreen(
-            speechText = "Listo para conversar contigo",
+            speechText = "Aquí para conversar contigo",
             isPaused = false,
             onTogglePause = {},
             onSpeakClick = {}

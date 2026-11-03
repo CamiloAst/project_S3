@@ -36,7 +36,9 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import uq.seminario.projects3.avatar.AssistantAvatar
 import uq.seminario.projects3.ui.components.AudioPermissionDialog
+import uq.seminario.projects3.ui.screens.AvatarSelectionScreen
 import uq.seminario.projects3.ui.screens.BotResponseScreen
 import uq.seminario.projects3.ui.screens.DecisionScreen
 import uq.seminario.projects3.ui.screens.EmergencyScreen
@@ -76,9 +78,14 @@ fun ChatbotApp(
     // Se pasa como State (sin delegar) para que el volumen, que cambia muchas veces por
     // segundo, solo recomponga el botón del micrófono y no toda la app
     val voiceLevel = viewModel.voiceLevel.collectAsStateWithLifecycle()
+    val chosenAvatar by viewModel.avatar.collectAsStateWithLifecycle()
+    // Solo es null en la primera elección, donde no se muestra ninguna pantalla de conversación
+    val avatar = chosenAvatar ?: AssistantAvatar.DEFAULT
 
     // Soporte del botón físico/sistema "Atrás" de Android en todas las pantallas excepto Idle
-    BackHandler(enabled = uiState != UiState.Idle) {
+    // y la primera elección de acompañante (ahí "Atrás" cierra la app, como en Idle)
+    val isFirstAvatarChoice = uiState == UiState.ChoosingAvatar && chosenAvatar == null
+    BackHandler(enabled = uiState != UiState.Idle && !isFirstAvatarChoice) {
         viewModel.navigateBack()
     }
 
@@ -196,9 +203,23 @@ fun ChatbotApp(
                 label = "screen_fade_transition"
             ) { state ->
                 when (state) {
+                    is UiState.ChoosingAvatar -> {
+                        AvatarSelectionScreen(
+                            currentAvatar = chosenAvatar,
+                            onAvatarChosen = { viewModel.onAvatarChosen(it) },
+                            onBackClick = if (chosenAvatar != null) {
+                                { viewModel.navigateBack() }
+                            } else {
+                                null
+                            }
+                        )
+                    }
+
                     is UiState.Idle -> {
                         VoiceInputScreen(
                             isListening = false,
+                            avatar = avatar,
+                            onChangeAvatarClick = { viewModel.onChangeAvatarClicked() },
                             onMicClick = {
                                 viewModel.onMicClicked(
                                     hasPermission = hasAudioPermission,
@@ -216,6 +237,7 @@ fun ChatbotApp(
                     is UiState.Listening -> {
                         VoiceInputScreen(
                             isListening = true,
+                            avatar = avatar,
                             voiceLevel = { voiceLevel.value },
                             onMicClick = {
                                 viewModel.onMicClicked(
@@ -233,6 +255,7 @@ fun ChatbotApp(
 
                     is UiState.Thinking -> {
                         ThinkingScreen(
+                            avatar = avatar,
                             onBackClick = { viewModel.navigateBack() },
                             onHomeClick = { viewModel.navigateHome() }
                         )
@@ -243,6 +266,7 @@ fun ChatbotApp(
                             RecommendationScreen(
                                 speechText = state.screenText,
                                 isPaused = state.isPaused,
+                                avatar = avatar,
                                 onTogglePause = { viewModel.toggleSpeakingPause() },
                                 onRepeatClick = { viewModel.repeatLastResponse() },
                                 onBackClick = { viewModel.navigateBack() },
@@ -260,6 +284,7 @@ fun ChatbotApp(
                             BotResponseScreen(
                                 speechText = state.screenText,
                                 isPaused = state.isPaused,
+                                avatar = avatar,
                                 userEmotion = state.userEmotion,
                                 onTogglePause = { viewModel.toggleSpeakingPause() },
                                 onRepeatClick = { viewModel.repeatLastResponse() },
@@ -285,6 +310,8 @@ fun ChatbotApp(
                             noText = state.dismissOption.title,
                             noSubtitle = state.dismissOption.subtitle,
                             userEmotion = state.userEmotion,
+                            avatar = avatar,
+                            isAvatarSpeaking = !isPaused,
                             onYesClick = { viewModel.onDecisionMade(true) },
                             onNoClick = { viewModel.onDecisionMade(false) },
                             onVoiceResponseClick = {
@@ -303,6 +330,7 @@ fun ChatbotApp(
                     is UiState.Emergency -> {
                         EmergencyScreen(
                             screenText = state.screenText,
+                            avatar = avatar,
                             isPaused = isPaused,
                             onTogglePause = { viewModel.toggleSpeakingPause() },
                             onRepeatClick = { viewModel.repeatLastResponse() },
@@ -323,6 +351,7 @@ fun ChatbotApp(
                         RepairScreen(
                             message = state.message,
                             hint = state.hint,
+                            avatar = avatar,
                             isPaused = isPaused,
                             onRetryClick = {
                                 viewModel.onMicClicked(

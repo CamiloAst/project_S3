@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import uq.seminario.projects3.BuildConfig
 import uq.seminario.projects3.audio.AudioEngine
+import uq.seminario.projects3.avatar.AssistantAvatar
+import uq.seminario.projects3.avatar.AvatarPreferences
 import uq.seminario.projects3.network.ChatApiClient
 import uq.seminario.projects3.network.ChatData
 import uq.seminario.projects3.safety.EmergencyDetector
@@ -32,6 +34,11 @@ data class DecisionOption(
  * Estados de UI requeridos para el chatbot de acompañamiento gerontológico (Modelo CARE).
  */
 sealed interface UiState {
+    /**
+     * Elección del acompañante (avatar). Es la primera pantalla mientras no haya uno guardado
+     * y se vuelve a abrir desde "Cambiar acompañante" en la pantalla de inicio.
+     */
+    data object ChoosingAvatar : UiState
     data object Idle : UiState
     data object Listening : UiState
     /**
@@ -40,14 +47,14 @@ sealed interface UiState {
      */
     data object Thinking : UiState
     data class Speaking(
-        val screenText: String = "Listo para conversar contigo",
+        val screenText: String = "Aquí para conversar contigo",
         val spokenText: String = "Qué gusto saludarte. Estoy aquí para conversar contigo con calma sobre lo que quieras. ¿Cómo va tu día?",
         val userEmotion: String = "NEUTRA",
         val isPaused: Boolean = false
     ) : UiState
     data class AwaitingDecision(
         val question: String = "¿Quieres continuar con la conversación?",
-        val spokenText: String = "Aquí estoy atento para acompañarte en lo que necesites. ¿Quieres continuar con nuestra charla en este momento?",
+        val spokenText: String = "Aquí estoy para acompañarte en lo que necesites. ¿Quieres continuar con nuestra charla en este momento?",
         val userEmotion: String = "NEUTRA",
         val confirmOption: DecisionOption = DecisionOption(
             title = "Sí",
@@ -107,7 +114,13 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
     // Historial de navegación de pantallas (Backstack de estados UI)
     private val stateHistory = ArrayDeque<UiState>()
 
-    private val _uiState = MutableStateFlow<UiState>(UiState.Idle)
+    // Acompañante elegido (null hasta la primera elección)
+    private val _avatar = MutableStateFlow(AvatarPreferences.load(application))
+    val avatar: StateFlow<AssistantAvatar?> = _avatar.asStateFlow()
+
+    private val _uiState = MutableStateFlow<UiState>(
+        if (_avatar.value == null) UiState.ChoosingAvatar else UiState.Idle
+    )
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
 
     // --- Estados de Controles de Audio y Lectura ---
@@ -168,6 +181,14 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
             handleTtsPlaybackFinished()
         }
     )
+
+    init {
+        // La voz local de respaldo también sigue al acompañante guardado
+        audioEngine.setVoicePitch(currentAvatar().localTtsPitch)
+    }
+
+    /** Acompañante que habla ahora (el femenino por defecto mientras no haya elección). */
+    private fun currentAvatar(): AssistantAvatar = _avatar.value ?: AssistantAvatar.DEFAULT
 
     /**
      * Detiene inmediatamente tanto el MediaPlayer neural como el TextToSpeech local
@@ -334,6 +355,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
      * - Restaura el estado anterior de la pila o regresa a `Idle` si está vacía.
      */
     fun navigateBack() {
+        // Sin acompañante elegido no hay pantalla anterior: primero hay que elegir uno
+        if (_uiState.value is UiState.ChoosingAvatar && _avatar.value == null) return
         activeChatJob?.cancel()
         audioEngine.triggerHapticFeedback()
         stopMediaPlayerAndTts()
@@ -417,6 +440,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                 audioEngine.cancelListening()
                 startListeningWithHaptics()
             }
+            // La pantalla de elección no tiene micrófono
+            is UiState.ChoosingAvatar -> Unit
         }
     }
 
@@ -431,6 +456,29 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
 
     fun dismissPermissionDialog() {
         _showPermissionDialog.value = false
+    }
+
+    // =========================================================================
+    // ELECCIÓN DEL ACOMPAÑANTE (AVATAR)
+    // =========================================================================
+
+    /** "Cambiar acompañante" en la pantalla de inicio: "Atrás" vuelve a inicio sin cambiar nada. */
+    fun onChangeAvatarClicked() {
+        activeChatJob?.cancel()
+        audioEngine.triggerHapticFeedback()
+        stopMediaPlayerAndTts()
+        audioEngine.stopAllAndCancel()
+        _isPaused.value = true
+        transitionToState(UiState.ChoosingAvatar)
+    }
+
+    /** Guarda el acompañante elegido y abre la pantalla de inicio con el historial limpio. */
+    fun onAvatarChosen(avatar: AssistantAvatar) {
+        audioEngine.triggerHapticFeedback()
+        AvatarPreferences.save(getApplication<Application>(), avatar)
+        _avatar.value = avatar
+        audioEngine.setVoicePitch(avatar.localTtsPitch)
+        transitionToState(UiState.Idle)
     }
 
     fun onPermissionGranted() {
@@ -464,7 +512,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         activeChatJob = viewModelScope.launch {
             val result = ChatApiClient.sendChatMessage(
                 message = transcribedText,
-                sessionId = sessionId
+                sessionId = sessionId,
+                companion = currentAvatar().apiValue
             )
 
             result.onSuccess { response ->
@@ -890,8 +939,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
             }
             else -> {
                 ChatData(
-                    spoken_text = "Qué gusto saludarte y compartir este momento de conversación contigo. Estoy listo para escucharte con toda calma sobre lo que quieras platicar. ¿Cómo ha estado tu jornada?",
-                    screen_text = "Listo para conversar contigo con calma",
+                    spoken_text = "Qué gusto saludarte y compartir este momento de conversación contigo. Estoy aquí para escucharte con toda calma sobre lo que quieras platicar. ¿Cómo ha estado tu jornada?",
+                    screen_text = "Aquí para conversar contigo con calma",
                     user_emotion = "NEUTRA",
                     suggested_action = "continue"
                 )

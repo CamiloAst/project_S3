@@ -13,23 +13,24 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 ## 3. Estructura
 - `app/src/main/java/uq/seminario/projects3/`
   - `audio/AudioEngine.kt`: reconocimiento de voz (variante de español del teléfono o es-CO) y reproducción.
+  - `avatar/AssistantAvatar.kt` (acompañantes `MALE`/`FEMALE`, imágenes en `res/drawable-nodpi/avatar_*.webp`) y `avatar/AvatarPreferences.kt` (elección guardada en SharedPreferences `care_avatar`).
   - `network/ChatApiClient.kt`: Retrofit, DTO todo-nullable y `toChatResponse()`.
   - `safety/EmergencyDetector.kt`: detector local de frases de emergencia.
   - `session/SessionIdProvider.kt`: `sessionId` único por instalación.
   - `viewmodel/ChatbotViewModel.kt`: máquina de estados `UiState`, pila de navegación, fallback local.
-  - `ui/ChatbotApp.kt`, `ui/screens/*`, `ui/components/*`: pantallas Compose (incluida `ThinkingScreen`, espera mientras la IA responde).
+  - `ui/ChatbotApp.kt`, `ui/screens/*`, `ui/components/*`: pantallas Compose (incluidas `ThinkingScreen`, espera mientras la IA responde, y `AvatarSelectionScreen`, elección del acompañante). `ui/components/AssistantAvatarBadge.kt` dibuja el avatar con ondas mientras habla.
 - `backend/`
   - `server.js`: Express, rate limit, rutas `/api/chat` y de sesión.
   - `controllers/chatController.js`: guardarraíl de emergencia, Gemini, banco de respuestas de respaldo, saneamiento.
-  - `services/emergencyDetector.js`, `services/sessionStore.js` (file/redis/memory), `services/ttsService.js`.
+  - `services/emergencyDetector.js`, `services/sessionStore.js` (file/redis/memory), `services/ttsService.js` (una voz neural por acompañante, `VOICE_PROFILES`).
   - `middleware/security.js`: token Bearer y utilidades de privacidad de logs.
-  - `test/`: pruebas del controlador, detector (casos compartidos en `emergency-cases.json`) y seguridad.
+  - `test/`: pruebas del controlador, detector (casos compartidos en `emergency-cases.json`), seguridad y voces del TTS.
 
 ## 4. Cómo ejecutar
 - Backend (desde `backend/`): `npm install`, copiar `.env.example` a `.env` y definir `GEMINI_API_KEY`; `npm run dev` (puerto 3000); `npm test`.
-  Variables útiles: `API_ACCESS_TOKEN` (obligatoria con `NODE_ENV=production`), `SESSION_STORE`, `EDGE_TTS_ENABLED`, `LOG_USER_TEXT`.
+  Variables útiles: `API_ACCESS_TOKEN` (obligatoria con `NODE_ENV=production`), `SESSION_STORE`, `EDGE_TTS_ENABLED`, `EDGE_TTS_VOICE` / `EDGE_TTS_VOICE_MALE` (voces de la compañera y el compañero), `LOG_USER_TEXT`.
 - Android (desde la raíz): `./gradlew assembleDebug`, `./gradlew :app:testDebugUnitTest`. En este Windows usar el JDK de Android Studio (`JAVA_HOME=E:\Program Files\Android\Android Studio\jbr` y `-Dorg.gradle.java.home=...`).
-- Pruebas de UI en emulador (no corren en CI): `./gradlew :app:connectedDebugAndroidTest` (incluye `ThinkingScreenTest`).
+- Pruebas de UI en emulador (no corren en CI): `./gradlew :app:connectedDebugAndroidTest` (incluye `ThinkingScreenTest` y `AvatarSelectionScreenTest`). Ojo: esta tarea desinstala la app al terminar, así que se pierden los permisos concedidos y el acompañante elegido.
 - Configuración app ↔ backend en `local.properties`: `care.apiBaseUrl.debug`, `care.apiBaseUrl.release` (HTTPS obligatorio), `care.apiToken` (igual a `API_ACCESS_TOKEN`).
 - Android 17+ (`targetSdk = 37`): la app debug pide al abrirse el permiso «Dispositivos cercanos / red local» (`ACCESS_LOCAL_NETWORK`). Si se deniega, no llega al backend (ni siquiera a `10.0.2.2`) y todas las respuestas salen del respaldo local. Alternativa sin permiso: `adb reverse tcp:3000 tcp:3000` y `care.apiBaseUrl.debug=http://127.0.0.1:3000/`.
 - Comprobar que responde Gemini: cada mensaje que llega deja en la consola del backend `POST /api/chat`, `⚡ [Gemini LLM Latency]` y `🎯 [Gemini Emotion]` (o `🛡️ [Fallback Activado]`); `GET /api/health` muestra `aiProvider.stats.gemini`, `stats.retries`, `lastSuccessAt` y `lastError`. Los reintentos aparecen como `🔁 [Gemini Retry]`. En logcat (`ChatbotViewModel`), «Respuesta CARE recibida» = backend; «Aplicando respaldo CARE local» = no llegó. Consola del backend en silencio = la petición no llegó.
@@ -48,23 +49,31 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Sin barra de estados de prueba: se quitó para las pruebas con usuarios reales.
 - Memoria de conversación de dos niveles, sin llamadas extra a Gemini: ventana de 20 mensajes (10 intercambios, `SESSION_MAX_MESSAGES`) y notas resumidas (`session.memory`, máx. 600 caracteres) que Gemini reescribe en cada turno en el campo interno `conversation_memory`. Ese campo se quita antes de responder, así que la app no cambia. La sesión sigue caducando a los 60 min de inactividad: recordar entre días exigiría alargar el TTL y que el consentimiento de las pruebas lo cubra.
 - `ACCESS_LOCAL_NETWORK` solo en el manifest de debug y pedido en `MainActivity` solo en debug con Android 17+: el backend de desarrollo vive en la red local; release usa una URL HTTPS pública y no lo necesita.
+- Acompañante (avatar): nuevo `UiState.ChoosingAvatar`, primera pantalla mientras no haya elección guardada y reabierta desde "Cambiar acompañante" en inicio (ahí "Atrás" vuelve sin cambiar nada; la primera vez "Atrás" cierra la app). Elegir marca la tarjeta y "Empezar a conversar" confirma, para que un toque accidental no lo cambie. El avatar aparece en todas las pantallas y muestra ondas mientras suena la voz (`!isPaused`); en emergencia lleva borde y distintivo rojos, en reparación una lupa. La elección sí entra en las copias de seguridad (no es sensible). Por defecto `FEMALE`.
+- La voz sigue al acompañante: la app envía `companion` (`"female"` | `"male"`) en `POST /api/chat`; el backend usa Salomé o Gonzalo (Edge TTS, gratis, un cliente precalentado por voz) y añade al prompt de cada turno el género con el que el asistente habla de sí. `companion` es opcional y un valor desconocido usa `"female"` sin dar 400, para que una app vieja o nueva nunca caiga al respaldo por esto. Los textos fijos (banco, respaldo local, valores por defecto) se reescribieron sin género ("Estoy aquí" en vez de "Estoy listo") para servir a ambos sin duplicar el banco. El TTS local de respaldo no sabe el género de las voces de Android: para el compañero solo baja el tono (0.8).
 
 ## 6. Estado actual
 - Correcciones de criticidad alta, media y baja integradas en `main` (PR #2, #3 y #4).
 - App preparada para pruebas con usuarios reales (rama `feat/pruebas-usuarios`): sin barra de prueba, con pantalla "Pensando" e icono de escucha reactivo a la voz.
-- Pruebas en verde al 2026-11-03: backend 22/22, `:app:testDebugUnitTest` 10/10, `ThinkingScreenTest` 3/3 en emulador.
+- Pruebas en verde al 2026-11-03: backend 27/27, `:app:testDebugUnitTest` 15/15, `ThinkingScreenTest` 3/3 y `AvatarSelectionScreenTest` 3/3 en emulador.
+- Elección de acompañante funcionando en el emulador (elegir, cambiar y "Atrás"). Comprobado en vivo que `handleChat` con `companion: "male"` devuelve audio de `es-CO-GonzaloNeural` y con `"female"` de Salomé. Falta: oírlo en el teléfono, ver que Gemini real respeta el género indicado y escuchar cómo suena el respaldo local con tono bajo.
 - El reconocimiento de voz ya funciona en el emulador (Android 17). Hasta este arreglo, la app nunca llegaba al backend (Android 17 bloqueaba `10.0.2.2`) y todas las respuestas eran del respaldo local. Con el permiso concedido, la conexión a `10.0.2.2:3000` funciona; falta ver una conversación completa respondida por Gemini.
 - La memoria resumida no se ha probado aún contra Gemini real (las pruebas corren sin clave). Se verifica con el log `🧠 [Memoria]` y `hasMemory` en `GET /api/chat/session/:sessionId`.
 - El guardrail médico responde «¿Quieres que contactemos a tu cuidador…?», lo que contradice la regla de no prometer contactar a nadie; pendiente de corregir.
 - Problemas conocidos: el `JAVA_HOME` global de esta máquina apunta a un JRE inexistente; `.idea/vcs.xml` aparece sin versionar (generado por Android Studio).
 
 ## 7. Próximos pasos
+- Probar con Gemini real y en un teléfono que el compañero habla con voz y género masculinos; si el tono bajo del respaldo local suena mal, buscar en `tts.voices` una voz masculina conocida del motor de Google.
+- Los textos fijos aún tratan al usuario en masculino genérico ("tranquilo", "acompañado"); el género del usuario no se conoce.
+- Revisar la licencia/atribución de las imágenes de los avatares si vienen de un banco de imágenes.
 - Comprobar con Gemini real que una conversación larga recuerda datos del principio y medir si la latencia sube.
 - Probar el flujo completo en un dispositivo físico contra el backend con Gemini real (voz real: animación del icono y pantalla "Pensando").
 - Definir la URL HTTPS de release y desplegar el backend con `API_ACCESS_TOKEN`.
 - Decidir si se versiona o se ignora `.idea/vcs.xml`.
 
 ## 8. Historial
+- **2026-11-03 (7)**: la voz sigue al acompañante. Campo opcional `companion` en `POST /api/chat`; `ttsService.js` pasa de un cliente compartido a uno por voz (Salomé / Gonzalo) con caché por acompañante; el prompt de cada turno indica el género; textos fijos sin género; tono bajo del TTS local para el compañero. Pruebas: 5 nuevas en el backend (`ttsService.test.js` y del controlador) y 1 en la app.
+- **2026-11-03 (6)**: pantalla de elección de acompañante (`AvatarSelectionScreen`, `UiState.ChoosingAvatar`) con dos avatares (compañero y compañera). El elegido se guarda y aparece en todas las pantallas (`AssistantAvatarBadge`, con ondas mientras habla); "Cambiar acompañante" en inicio. Pruebas: `AssistantAvatarTest` (unitaria) y `AvatarSelectionScreenTest` (UI).
 - **2026-11-03 (5)**: la app solo recordaba los 3 últimos intercambios. El historial pasa de 6 a 20 mensajes y se añade memoria resumida por sesión (`conversation_memory` → `session.memory`, inyectada en el prompt entre `"""` como datos). `hasMemory` en la ruta de sesión y 3 pruebas nuevas.
 - **2026-11-03 (4)**: Gemini devolvía 503 («high demand») en varios turnos. Se añaden reintentos con espera exponencial ante 5xx (`withGeminiRetries`, `GEMINI_MAX_RETRIES`) dentro del mismo plazo, con 4 pruebas nuevas. Se descartó cambiar de proveedor para no salir del nivel gratuito.
 - **2026-11-03 (3)**: diagnóstico de «el backend no muestra nada»: Android 17 (protección de red local) descartaba las conexiones de la app a `10.0.2.2` y la app respondía con su respaldo local. Se declara `ACCESS_LOCAL_NETWORK` en el manifest de debug y `MainActivity` lo pide en debug con Android 17+.

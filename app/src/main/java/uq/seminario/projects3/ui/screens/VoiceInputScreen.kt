@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
@@ -35,6 +36,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -63,7 +65,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.flow.collectLatest
+import uq.seminario.projects3.avatar.AssistantAvatar
 import uq.seminario.projects3.ui.components.AppNavigationHeader
+import uq.seminario.projects3.ui.components.AssistantAvatarBadge
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.DarkText
 import uq.seminario.projects3.ui.theme.ListeningTerracotta
@@ -87,6 +91,7 @@ private const val VOICE_HALO_MAX_GROWTH = 0.3f
  * - Barra superior `AppNavigationHeader`:
  *     * En `Idle`: muestra botón discreto "Salir" en la esquina superior derecha.
  *     * En `Listening`: muestra "← Atrás" e "Inicio" para cancelar o regresar con seguridad.
+ * - Avatar del acompañante elegido bajo la barra; en `Idle`, "Cambiar acompañante" abre su elección.
  * - Tipografía amplia (>=28sp títulos, >=20sp cuerpo).
  * - Botón central circular masivo (170dp) con confirmación háptica.
  * - En `Listening`, las barras del icono y el halo del botón se mueven con el volumen de la voz
@@ -97,10 +102,12 @@ fun VoiceInputScreen(
     isListening: Boolean,
     onMicClick: () -> Unit,
     modifier: Modifier = Modifier,
+    avatar: AssistantAvatar = AssistantAvatar.DEFAULT,
     voiceLevel: () -> Float = { 0f },
     onBackClick: () -> Unit = {},
     onHomeClick: () -> Unit = {},
-    onExitClick: () -> Unit = {}
+    onExitClick: () -> Unit = {},
+    onChangeAvatarClick: () -> Unit = {}
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -130,7 +137,40 @@ fun VoiceInputScreen(
                     onExitClick = onExitClick
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(4.dp))
+
+                AssistantAvatarBadge(
+                    avatar = avatar,
+                    avatarSize = 104.dp,
+                    contentDescription = if (isListening) {
+                        "${avatar.title} te está escuchando"
+                    } else {
+                        avatar.title
+                    }
+                )
+
+                // "Cambiar acompañante" solo en inicio; al escuchar se reserva su alto para que
+                // el botón del micrófono no salte durante la transición entre ambas pantallas
+                if (isListening) {
+                    Spacer(modifier = Modifier.height(48.dp))
+                } else {
+                    TextButton(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onChangeAvatarClick()
+                        },
+                        modifier = Modifier.heightIn(min = 48.dp)
+                    ) {
+                        Text(
+                            text = "Cambiar acompañante",
+                            style = MaterialTheme.typography.labelLarge.copy(
+                                fontSize = 18.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = PrimaryDarkGreen
+                            )
+                        )
+                    }
+                }
 
                 HeaderGreetingSection()
             }
