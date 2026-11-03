@@ -71,7 +71,7 @@ GEMINI_MODEL=gemini-3.5-flash
 GEMINI_TIMEOUT_MS=8000
 SESSION_STORE=file
 SESSION_FILE_PATH=./data/sessions.json
-SESSION_MAX_MESSAGES=6
+SESSION_MAX_MESSAGES=20
 SESSION_TTL_MINUTES=60
 ```
 > **Nota:** Si no se define una `GEMINI_API_KEY`, el backend entra en **modo Banco CARE de Respaldo**, permitiendo probar todos los casos de uso y respuestas emocionales de inmediato sin costos de API.

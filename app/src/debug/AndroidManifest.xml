@@ -3,6 +3,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Android 17+ bloquea la red local (10.0.2.2, 192.168.x.x) sin este permiso; se pide en MainActivity.
+         Release no lo necesita: su backend es una URL HTTPS pública. -->
+    <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+
     <application
         android:usesCleartextTraffic="true"
         tools:replace="android:usesCleartextTraffic" />

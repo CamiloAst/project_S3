@@ -10,6 +10,8 @@ Voice companion assistant for older adults (Spanish-language UI and content). Tw
 
 All user-facing text, prompts, comments and docs are written in Spanish; keep it that way.
 
+It is a university project that must stay on free tiers: do not add paid LLM providers or features that require enabling billing.
+
 ### Modelo CARE (meaning matters)
 
 CARE here is the **multimodal interaction model**, not a list of conversational virtues:
@@ -56,6 +58,8 @@ User text must not reach logs by default: backend logs go through `userTextForLo
 ### App ↔ backend configuration
 Android reads, from `local.properties` (not versioned) or `-P`: `care.apiBaseUrl.debug` (default `http://10.0.2.2:3000/`), `care.apiBaseUrl.release` (must be HTTPS) and `care.apiToken`, exposed as `BuildConfig.CARE_API_BASE_URL` / `CARE_API_TOKEN`. `care.apiToken` must equal the backend's `API_ACCESS_TOKEN` (required when `NODE_ENV=production`); the app sends it as `Authorization: Bearer`. Cleartext HTTP is allowed only by `app/src/debug/AndroidManifest.xml`. Full HTTP body logging exists only in debug builds.
 
+Android 17+ (local network protection, `targetSdk = 37`) silently drops connections to private addresses, including the emulator's `10.0.2.2`, unless the app holds `ACCESS_LOCAL_NETWORK`. The debug manifest declares it and `MainActivity` requests it at launch (debug builds on API 37+ only). If it is denied, every request times out and the app answers from `generateLocalFallbackChatData` while the backend logs nothing. A silent backend console means the request never arrived.
+
 ## Architecture
 
 ### Request flow
@@ -64,9 +68,10 @@ Android reads, from `local.properties` (not versioned) or `-P`: `care.apiBaseUrl
 3. `backend/controllers/chatController.js` `handleChat`:
    - pre-LLM emergency check (`isCriticalRisk` from `services/emergencyDetector.js`) → short-circuits to `source: "emergency_guardrail"`;
    - otherwise Gemini with structured JSON output (`careResponseSchema`) and the system prompt `GERONTOLOGICAL_SYSTEM_PROMPT`; Gemini also classifies `user_emotion` (5 fixed categories);
-   - on any Gemini failure/timeout → keyword detector + `RESPONSE_VARIATIONS_BANK` with per-session anti-repetition (`source: "fallback_bank"`, `fallback_reason` set);
+   - Gemini 5xx errors (e.g. 503 "high demand") are first retried with exponential backoff by `withGeminiRetries` (`GEMINI_MAX_RETRIES`, default 2) within the same `GEMINI_TIMEOUT_MS` deadline; 429 (free-tier quota) and timeouts are not retried;
+   - on any remaining Gemini failure/timeout → keyword detector + `RESPONSE_VARIATIONS_BANK` with per-session anti-repetition (`source: "fallback_bank"`, `fallback_reason` set);
    - `sanitizeAndEnforceGuardrails` post-processes every answer (medical-prescription filter, screen_text length, enum validation);
-   - session history persisted via `services/sessionStore.js` (`file` | `redis` | `memory`);
+   - session history persisted via `services/sessionStore.js` (`file` | `redis` | `memory`); Gemini receives the last `SESSION_MAX_MESSAGES` messages (default 20 = 10 exchanges, forced even) plus `session.memory`, short notes about the user that Gemini rewrites every turn in the internal schema field `conversation_memory` (`mergeConversationMemory` keeps the previous notes if it comes back empty, caps them at 600 chars; `handleChat` strips the field, so it is not part of the API contract). Sessions (history and memory) expire after `SESSION_TTL_MINUTES` (60) of inactivity;
    - `services/ttsService.js` synthesizes MP3 with emotion-based prosody; it fails fast and returns `audio_base64: null` so the app falls back to local TTS. TTS is skipped when `elapsed + TTS_WORST_CASE_MS` would exceed `CHAT_RESPONSE_BUDGET_MS` (18 s).
    - Timeouts are coupled: the backend budget must stay below the app's `readTimeout` (25 s in `ChatApiClient.kt`); otherwise the app shows its local fallback while the backend already saved a different turn in the session history.
 4. `ChatbotViewModel.executeMasterClockSync` plays the neural MP3 (MediaPlayer) or local TTS and maps `suggested_action` to a `UiState`:
