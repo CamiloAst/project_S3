@@ -56,6 +56,8 @@ User text must not reach logs by default: backend logs go through `userTextForLo
 ### App ↔ backend configuration
 Android reads, from `local.properties` (not versioned) or `-P`: `care.apiBaseUrl.debug` (default `http://10.0.2.2:3000/`), `care.apiBaseUrl.release` (must be HTTPS) and `care.apiToken`, exposed as `BuildConfig.CARE_API_BASE_URL` / `CARE_API_TOKEN`. `care.apiToken` must equal the backend's `API_ACCESS_TOKEN` (required when `NODE_ENV=production`); the app sends it as `Authorization: Bearer`. Cleartext HTTP is allowed only by `app/src/debug/AndroidManifest.xml`. Full HTTP body logging exists only in debug builds.
 
+Android 17+ (local network protection, `targetSdk = 37`) silently drops connections to private addresses, including the emulator's `10.0.2.2`, unless the app holds `ACCESS_LOCAL_NETWORK`. The debug manifest declares it and `MainActivity` requests it at launch (debug builds on API 37+ only). If it is denied, every request times out and the app answers from `generateLocalFallbackChatData` while the backend logs nothing. A silent backend console means the request never arrived.
+
 ## Architecture
 
 ### Request flow

@@ -31,6 +31,8 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Android (desde la raíz): `./gradlew assembleDebug`, `./gradlew :app:testDebugUnitTest`. En este Windows usar el JDK de Android Studio (`JAVA_HOME=E:\Program Files\Android\Android Studio\jbr` y `-Dorg.gradle.java.home=...`).
 - Pruebas de UI en emulador (no corren en CI): `./gradlew :app:connectedDebugAndroidTest` (incluye `ThinkingScreenTest`).
 - Configuración app ↔ backend en `local.properties`: `care.apiBaseUrl.debug`, `care.apiBaseUrl.release` (HTTPS obligatorio), `care.apiToken` (igual a `API_ACCESS_TOKEN`).
+- Android 17+ (`targetSdk = 37`): la app debug pide al abrirse el permiso «Dispositivos cercanos / red local» (`ACCESS_LOCAL_NETWORK`). Si se deniega, no llega al backend (ni siquiera a `10.0.2.2`) y todas las respuestas salen del respaldo local. Alternativa sin permiso: `adb reverse tcp:3000 tcp:3000` y `care.apiBaseUrl.debug=http://127.0.0.1:3000/`.
+- Comprobar que responde Gemini: cada mensaje que llega deja en la consola del backend `POST /api/chat`, `⚡ [Gemini LLM Latency]` y `🎯 [Gemini Emotion]` (o `🛡️ [Fallback Activado]`); `GET /api/health` muestra `aiProvider.stats.gemini` y `lastSuccessAt`. En logcat (`ChatbotViewModel`), «Respuesta CARE recibida» = backend; «Aplicando respaldo CARE local» = no llegó. Consola del backend en silencio = la petición no llegó.
 
 ## 5. Decisiones
 - Respuesta con `spoken_text` completo y `screen_text` de 4 a 7 palabras que no lo copia (Complementariedad).
@@ -43,12 +45,13 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Pantalla "Pensando" (`UiState.Thinking`) desde el fin de la voz hasta la respuesta: solo en pantalla, sin voz (Asignación), para no solaparse con la respuesta; a los 8 s cambia el mensaje para tranquilizar. Es transitoria como `Listening` (no entra en el historial de "Atrás").
 - El icono de escucha (barras + halo) sigue el volumen real de la voz (`onRmsChanged` → `voiceLevel`), leído en fase de dibujo para no recomponer la app.
 - Sin barra de estados de prueba: se quitó para las pruebas con usuarios reales.
+- `ACCESS_LOCAL_NETWORK` solo en el manifest de debug y pedido en `MainActivity` solo en debug con Android 17+: el backend de desarrollo vive en la red local; release usa una URL HTTPS pública y no lo necesita.
 
 ## 6. Estado actual
 - Correcciones de criticidad alta, media y baja integradas en `main` (PR #2, #3 y #4).
-- App preparada para pruebas con usuarios reales: sin barra de prueba, con pantalla "Pensando" e icono de escucha reactivo a la voz (sin commit todavía).
+- App preparada para pruebas con usuarios reales (rama `feat/pruebas-usuarios`): sin barra de prueba, con pantalla "Pensando" e icono de escucha reactivo a la voz.
 - Pruebas en verde al 2026-11-03: backend 15/15, `:app:testDebugUnitTest` 10/10, `ThinkingScreenTest` 3/3 en emulador.
-- Sin verificar con voz real: en el emulador el reconocedor falla al instante (código 7), así que la animación con voz y la pantalla "Pensando" solo se comprobaron con niveles simulados en pruebas de UI.
+- El reconocimiento de voz ya funciona en el emulador (Android 17). Hasta este arreglo, la app nunca llegaba al backend (Android 17 bloqueaba `10.0.2.2`) y todas las respuestas eran del respaldo local. Con el permiso concedido, la conexión a `10.0.2.2:3000` funciona; falta ver una conversación completa respondida por Gemini.
 - Problemas conocidos: el `JAVA_HOME` global de esta máquina apunta a un JRE inexistente; `.idea/vcs.xml` aparece sin versionar (generado por Android Studio).
 
 ## 7. Próximos pasos
@@ -57,6 +60,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Decidir si se versiona o se ignora `.idea/vcs.xml`.
 
 ## 8. Historial
+- **2026-11-03 (3)**: diagnóstico de «el backend no muestra nada»: Android 17 (protección de red local) descartaba las conexiones de la app a `10.0.2.2` y la app respondía con su respaldo local. Se declara `ACCESS_LOCAL_NETWORK` en el manifest de debug y `MainActivity` lo pide en debug con Android 17+.
 - **2026-11-03 (2)**: preparación para pruebas con usuarios: eliminada la barra de estados de prueba (y sus funciones de demostración en el ViewModel), nueva pantalla `ThinkingScreen` (`UiState.Thinking`), icono de escucha con barras y halo que siguen el volumen de la voz, y se descartan resultados/errores tardíos del reconocedor. Pruebas: `VoiceLevelTest` (unitaria) y `ThinkingScreenTest` (UI).
 - **2026-11-03**: PR #4 (criticidad baja) fusionado: validación de `sessionId` en rutas de sesión, idioma de reconocimiento según el teléfono, pausa en segundo plano, `screen_text` de 4–7 palabras, diálogo "Abrir ajustes" para el micrófono y limpieza. Creado este `CONTEXTO.md`.
 - **Anteriores**: commit inicial; PR #2 (criticidad alta) y PR #3 (criticidad media: robustez de red y voz, privacidad de logs, pruebas del controlador y CI).
