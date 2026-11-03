@@ -42,12 +42,16 @@ import uq.seminario.projects3.ui.theme.PrimaryDarkGreen
 /**
  * Diálogo accesible para solicitar el permiso de micrófono.
  * Explica con lenguaje claro y tipografía grande la razón del permiso al adulto mayor.
+ *
+ * Con [isPermanentlyDenied] Android ya no muestra su propio diálogo, así que el botón
+ * principal lleva a los Ajustes de la app y el texto explica cómo activarlo allí.
  */
 @Composable
 fun AudioPermissionDialog(
     onGrantPermissionClick: () -> Unit,
     onDismissRequest: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isPermanentlyDenied: Boolean = false
 ) {
     AlertDialog(
         onDismissRequest = onDismissRequest,
@@ -82,7 +86,11 @@ fun AudioPermissionDialog(
                 modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
             ) {
                 Text(
-                    text = "Para que tu asistente pueda escucharte y responderte, necesitamos permiso para usar el micrófono de tu teléfono.",
+                    text = if (isPermanentlyDenied) {
+                        "El micrófono está desactivado para esta aplicación. Para conversar por voz, actívalo en Ajustes, en la sección Permisos."
+                    } else {
+                        "Para que tu asistente pueda escucharte y responderte, necesitamos permiso para usar el micrófono de tu teléfono."
+                    },
                     style = MaterialTheme.typography.bodyLarge.copy(
                         fontSize = 20.sp,
                         lineHeight = 28.sp,
@@ -108,7 +116,11 @@ fun AudioPermissionDialog(
                     .heightIn(min = 64.dp)
                     .semantics {
                         role = Role.Button
-                        contentDescription = "Conceder permiso de micrófono"
+                        contentDescription = if (isPermanentlyDenied) {
+                            "Abrir los ajustes de la aplicación para activar el micrófono"
+                        } else {
+                            "Conceder permiso de micrófono"
+                        }
                     },
                 shape = RoundedCornerShape(16.dp),
                 colors = ButtonDefaults.buttonColors(
@@ -117,7 +129,7 @@ fun AudioPermissionDialog(
                 )
             ) {
                 Text(
-                    text = "Permitir micrófono",
+                    text = if (isPermanentlyDenied) "Abrir ajustes" else "Permitir micrófono",
                     style = MaterialTheme.typography.labelLarge.copy(
                         fontSize = 20.sp,
                         fontWeight = FontWeight.Bold

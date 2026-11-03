@@ -2,7 +2,10 @@ package uq.seminario.projects3.ui
 
 import android.Manifest
 import android.app.Activity
+import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -28,8 +31,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -39,7 +45,11 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import uq.seminario.projects3.BuildConfig
@@ -100,22 +110,73 @@ fun ChatbotApp(
         )
     }
 
+    // true cuando Android ya no muestra su diálogo ("No volver a preguntar" o dos rechazos):
+    // la única vía para conceder el micrófono es la pantalla de Ajustes de la app.
+    // Se exigen dos rechazos porque cerrar el primer diálogo sin elegir también devuelve
+    // shouldShowRequestPermissionRationale=false. rememberSaveable sobrevive a la rotación.
+    var micPermissionDenials by rememberSaveable { mutableIntStateOf(0) }
+    var isMicPermissionBlocked by rememberSaveable { mutableStateOf(false) }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
         hasAudioPermission = isGranted
         if (isGranted) {
+            micPermissionDenials = 0
+            isMicPermissionBlocked = false
             viewModel.onPermissionGranted()
         } else {
+            micPermissionDenials++
+            val activity = context as? Activity
+            isMicPermissionBlocked = activity != null && micPermissionDenials >= 2 &&
+                    !ActivityCompat.shouldShowRequestPermissionRationale(activity, Manifest.permission.RECORD_AUDIO)
             viewModel.dismissPermissionDialog()
         }
     }
 
+    // Al salir de la app (ON_STOP) se pausa la lectura y se cancela el micrófono; al volver
+    // (ON_START) se relee el permiso por si el usuario lo concedió desde Ajustes
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                // Una rotación también emite ON_STOP: solo se pausa si la app deja de verse
+                Lifecycle.Event.ON_STOP -> if ((context as? Activity)?.isChangingConfigurations != true) {
+                    viewModel.onAppBackgrounded()
+                }
+                Lifecycle.Event.ON_START -> {
+                    hasAudioPermission = ContextCompat.checkSelfPermission(
+                        context,
+                        Manifest.permission.RECORD_AUDIO
+                    ) == PackageManager.PERMISSION_GRANTED
+                    if (hasAudioPermission) {
+                        micPermissionDenials = 0
+                        isMicPermissionBlocked = false
+                    }
+                    viewModel.onAppForegrounded()
+                }
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     if (showPermissionDialog) {
         AudioPermissionDialog(
+            isPermanentlyDenied = isMicPermissionBlocked,
             onGrantPermissionClick = {
                 viewModel.dismissPermissionDialog()
-                permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                if (isMicPermissionBlocked) {
+                    context.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.fromParts("package", context.packageName, null)
+                        )
+                    )
+                } else {
+                    permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                }
             },
             onDismissRequest = {
                 viewModel.dismissPermissionDialog()

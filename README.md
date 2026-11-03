@@ -78,6 +78,9 @@ projectS3/
 - **Reconocimiento y Síntesis de Voz**: Flujo manos libres con lectura en voz alta pausada (`~0.85x`) y captura por micrófono.
 - **Manejo de Errores y Reparación Conversacional**: Pantalla de reparación (`RepairScreen`) amigable ante fallos de conexión o incomprensión auditiva.
 - **Alerta de Posible Emergencia**: Si el backend responde `emergency_alert` (o, sin conexión, el detector local reconoce una frase de riesgo), la app muestra la pantalla `EmergencyScreen`, vibra y lee el mensaje en voz alta pidiendo buscar ayuda de una persona cercana. En esta fase de pruebas **no se realizan llamadas ni avisos automáticos**.
+- **Sin audio en segundo plano**: al salir de la app se pausa la lectura y se cancela el micrófono (girar el teléfono no cuenta como salir). Las respuestas que lleguen mientras tanto quedan en "Continuar lectura"; la única excepción es una alerta de posible emergencia, que se lee igualmente.
+- **Reconocimiento de voz en español local**: usa la variante del teléfono (es-CO, es-MX…) o, si no está en español, español de Colombia.
+- **Permiso de micrófono bloqueado**: si Android ya no muestra su diálogo, la app ofrece "Abrir ajustes" para activarlo.
 - **Sesión por Instalación**: Cada instalación genera un `sessionId` aleatorio (UUID) para que el historial conversacional de un usuario nunca se mezcle con el de otro dispositivo.
 
 ### Requisitos y Compilación

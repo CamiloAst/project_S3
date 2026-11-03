@@ -264,6 +264,16 @@ async function synthesizeBufferOnce(spokenText, prosody) {
   });
 }
 
+function audioCacheKey(trimmedText, userEmotion) {
+  return `${currentVoiceName}|${userEmotion}|${trimmedText}`;
+}
+
+/** true si el audio de este texto ya está en caché (se entrega sin latencia de red). */
+function hasCachedAudio(spokenText, userEmotion = "NEUTRA") {
+  if (!EDGE_TTS_ENABLED || !spokenText || typeof spokenText !== "string") return false;
+  return audioCache.has(audioCacheKey(spokenText.trim(), userEmotion));
+}
+
 /**
  * Convierte `spoken_text` en audio MP3 codificado en Base64 con modulación afectiva.
  * Cumple estricto fail-fast (< 2 segundos): si ocurre cualquier error o demora,
@@ -287,7 +297,7 @@ async function synthesizeSpeechWithEmotion(spokenText, userEmotion = "NEUTRA") {
   }
 
   const trimmedText = spokenText.trim();
-  const cacheKey = `${currentVoiceName}|${userEmotion}|${trimmedText}`;
+  const cacheKey = audioCacheKey(trimmedText, userEmotion);
 
   if (audioCache.has(cacheKey)) {
     const cached = audioCache.get(cacheKey);
@@ -360,5 +370,6 @@ module.exports = {
   getProsodyForEmotion,
   calculateAudioDurationMs,
   synthesizeSpeechWithEmotion,
+  hasCachedAudio,
   TTS_WORST_CASE_MS
 };
