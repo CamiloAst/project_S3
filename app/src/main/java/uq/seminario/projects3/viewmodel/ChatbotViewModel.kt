@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import uq.seminario.projects3.BuildConfig
 import uq.seminario.projects3.audio.AudioEngine
 import uq.seminario.projects3.network.ChatApiClient
 import uq.seminario.projects3.network.ChatData
@@ -54,7 +55,8 @@ sealed interface UiState {
         )
     ) : UiState
     data class Repair(
-        val message: String = DEFAULT_REPAIR_MESSAGE
+        val message: String = DEFAULT_REPAIR_MESSAGE,
+        val hint: String = DEFAULT_REPAIR_HINT
     ) : UiState
     /**
      * Alerta de posible emergencia (`suggested_action = "emergency_alert"`).
@@ -67,6 +69,7 @@ sealed interface UiState {
 
     companion object {
         const val DEFAULT_REPAIR_MESSAGE = "No he entendido tu pregunta. ¿Puedes repetirla?"
+        const val DEFAULT_REPAIR_HINT = "Puedes hablar más despacio o acercarte un poco más al teléfono."
 
         // Mismo mensaje que EMERGENCY_SPOKEN_TEXT / EMERGENCY_SCREEN_TEXT del backend
         const val EMERGENCY_SPOKEN_TEXT = "Te estoy escuchando, mantén la calma y no hagas esfuerzos. Lo que me cuentas puede ser urgente. Por favor, pide ayuda ahora mismo a una persona cercana o a tu cuidador."
@@ -82,6 +85,16 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
 
     companion object {
         private const val TAG = "ChatbotViewModel"
+
+        // El audio neural ya llega ralentizado por la prosodia del backend (-8 % a -18 %):
+        // "Pausado" lo reproduce tal cual y "Normal" lo acelera ligeramente.
+        private const val NEURAL_SPEED_SLOW = 1.0f
+        private const val NEURAL_SPEED_NORMAL = 1.15f
+
+        private const val RECOGNITION_UNAVAILABLE_MESSAGE =
+            "El reconocimiento de voz no está disponible en este teléfono. Puedes usar los botones de la pantalla."
+        private const val RECOGNITION_UNAVAILABLE_HINT =
+            "Revisa que el teléfono tenga instalado el servicio de voz de Google y vuelve a intentarlo."
     }
 
     // Identificador único por instalación (evita mezclar historiales entre dispositivos)
@@ -188,21 +201,21 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
             }
             currentTempAudioFile = tempMp3
 
-            val player = MediaPlayer().apply {
+            val player = MediaPlayer()
+            mediaPlayer = player
+            player.apply {
                 setDataSource(tempMp3.absolutePath)
                 setOnCompletionListener {
                     handleTtsPlaybackFinished()
                 }
-                setOnErrorListener { _, what, extra ->
+                setOnErrorListener { failedPlayer, what, extra ->
                     Log.w(TAG, "Error en MediaPlayer neural (what=$what, extra=$extra). Activando TTS local.")
-                    isNeuralAudioActive = false
+                    releasePlayer(failedPlayer)
                     audioEngine.speak(spokenText)
                     true
                 }
                 prepare()
             }
-
-            mediaPlayer = player
             isNeuralAudioActive = true
 
             if (player.duration > 0) {
@@ -210,15 +223,44 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
             }
 
             if (!_isVoiceMuted.value) {
-                player.start()
+                startNeuralPlayback(player)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Fallo al reproducir voz neural MP3 (${e.message}). Usando TTS local de respaldo.")
-            isNeuralAudioActive = false
-            mediaPlayer = null
+            mediaPlayer?.let { releasePlayer(it) }
             audioEngine.speak(spokenText)
         }
     }
+
+    /** Libera un MediaPlayer fallido para no retener el decodificador del sistema. */
+    private fun releasePlayer(player: MediaPlayer) {
+        try {
+            player.release()
+        } catch (e: Exception) {
+            Log.w(TAG, "Error al liberar MediaPlayer", e)
+        }
+        if (mediaPlayer === player) {
+            mediaPlayer = null
+            isNeuralAudioActive = false
+        }
+    }
+
+    /**
+     * Inicia (o reanuda) el audio neural aplicando la velocidad elegida por el usuario.
+     * La velocidad se fija después de start(): en Android, setPlaybackParams con velocidad
+     * > 0 arranca la reproducción, lo que ignoraría el silencio (mute) si se hiciera antes.
+     */
+    private fun startNeuralPlayback(player: MediaPlayer) {
+        player.start()
+        try {
+            player.playbackParams = player.playbackParams.setSpeed(currentNeuralSpeed())
+        } catch (e: Exception) {
+            Log.w(TAG, "El dispositivo no permite cambiar la velocidad del audio neural", e)
+        }
+    }
+
+    private fun currentNeuralSpeed(): Float =
+        if (_isSlowSpeech.value) NEURAL_SPEED_SLOW else NEURAL_SPEED_NORMAL
 
     // =========================================================================
     // 1. PILA DE NAVEGACIÓN (HISTORIAL ArrayDeque<UiState>, ATRÁS E INICIO)
@@ -368,11 +410,14 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
 
             result.onSuccess { response ->
                 val data = response.data
-                Log.d(
-                    TAG,
-                    "Respuesta CARE recibida [sessionId=${response.sessionId}]: " +
-                            "action=${data.suggested_action}, emotion=${data.user_emotion}, screen='${data.screen_text}'"
-                )
+                // screen_text resume el tema de la conversación: solo se registra en debug
+                if (BuildConfig.DEBUG) {
+                    Log.d(
+                        TAG,
+                        "Respuesta CARE recibida [sessionId=${response.sessionId}]: " +
+                                "action=${data.suggested_action}, emotion=${data.user_emotion}, screen='${data.screen_text}'"
+                    )
+                }
                 executeMasterClockSync(data)
             }.onFailure { error ->
                 Log.w(TAG, "Error o latencia al conectar con el backend (${error.message}). Aplicando respaldo CARE local.")
@@ -464,10 +509,20 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
     private fun handleSpeechRecognitionError(errorCode: Int) {
         Log.d(TAG, "Fallo en STT (código $errorCode). Navegando a pantalla de reparación.")
         stopMediaPlayerAndTts()
-        val repairMessage = UiState.DEFAULT_REPAIR_MESSAGE
+        val recognitionUnavailable = errorCode == AudioEngine.ERROR_RECOGNITION_UNAVAILABLE
+        val repairMessage = if (recognitionUnavailable) {
+            RECOGNITION_UNAVAILABLE_MESSAGE
+        } else {
+            UiState.DEFAULT_REPAIR_MESSAGE
+        }
+        val repairHint = if (recognitionUnavailable) {
+            RECOGNITION_UNAVAILABLE_HINT
+        } else {
+            UiState.DEFAULT_REPAIR_HINT
+        }
         _lastSpokenText.value = repairMessage
         _isPaused.value = _isVoiceMuted.value
-        transitionToState(UiState.Repair(message = repairMessage))
+        transitionToState(UiState.Repair(message = repairMessage, hint = repairHint))
         audioEngine.speak(repairMessage)
     }
 
@@ -514,7 +569,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
             val player = mediaPlayer
             if (isNeuralAudioActive && player != null) {
                 try {
-                    player.start()
+                    startNeuralPlayback(player)
                 } catch (e: Exception) {
                     Log.w(TAG, "Error al reanudar MediaPlayer; usando TTS de respaldo", e)
                     isNeuralAudioActive = false
@@ -564,7 +619,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         if (isNeuralAudioActive && player != null) {
             try {
                 player.seekTo(0)
-                player.start()
+                startNeuralPlayback(player)
                 return
             } catch (e: Exception) {
                 Log.w(TAG, "Error al repetir MediaPlayer; usando TTS de respaldo", e)
@@ -598,9 +653,9 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         val player = mediaPlayer
         if (isNeuralAudioActive && player != null) {
             try {
-                player.seekTo(0)
+                // Cambia la velocidad sin volver al inicio (start() sobre un audio terminado lo reinicia)
                 if (!_isVoiceMuted.value) {
-                    player.start()
+                    startNeuralPlayback(player)
                 }
                 return
             } catch (e: Exception) {
@@ -643,7 +698,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
             val player = mediaPlayer
             if (isNeuralAudioActive && player != null) {
                 try {
-                    player.start()
+                    startNeuralPlayback(player)
                     return
                 } catch (e: Exception) {
                     isNeuralAudioActive = false

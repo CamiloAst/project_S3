@@ -14,6 +14,9 @@ const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts");
 
 const PRIMARY_VOICE = process.env.EDGE_TTS_VOICE || "es-CO-SalomeNeural";
 const FALLBACK_VOICE = "es-MX-DaliaNeural";
+// EDGE_TTS_ENABLED=false desactiva la voz neural (pruebas automáticas o desarrollo sin red):
+// las respuestas llegan con audio_base64=null y la app usa su TTS local.
+const EDGE_TTS_ENABLED = process.env.EDGE_TTS_ENABLED !== "false";
 const TTS_FORMAT = OUTPUT_FORMAT.AUDIO_24KHZ_48KBITRATE_MONO_MP3;
 const TTS_CONNECTION_TIMEOUT_MS = 1900; // Si falla la conexión WebSocket, aborta en < 2s
 const TTS_FAILFAST_FIRST_BYTE_MS = 1950; // Si el stream no emite audio tras enviar SSML, aborta en < 2s
@@ -274,7 +277,7 @@ async function synthesizeSpeechWithEmotion(spokenText, userEmotion = "NEUTRA") {
   const prosody = getProsodyForEmotion(userEmotion);
   const fallbackDurationMs = calculateAudioDurationMs(spokenText, null, prosody.rate);
 
-  if (!spokenText || typeof spokenText !== "string" || !spokenText.trim()) {
+  if (!EDGE_TTS_ENABLED || !spokenText || typeof spokenText !== "string" || !spokenText.trim()) {
     return {
       audio_base64: null,
       audio_duration_ms: fallbackDurationMs,
@@ -344,9 +347,11 @@ async function synthesizeSpeechWithEmotion(spokenText, userEmotion = "NEUTRA") {
 }
 
 // Precalentar conexión WebSocket en segundo plano al cargar el servicio (sin bloquear el arranque)
-ensureTtsClient(PRIMARY_VOICE).catch((err) => {
-  console.warn(`ℹ️  [Neural TTS Init] Precalentamiento diferido (${err.message}). Se conectará bajo demanda.`);
-});
+if (EDGE_TTS_ENABLED) {
+  ensureTtsClient(PRIMARY_VOICE).catch((err) => {
+    console.warn(`ℹ️  [Neural TTS Init] Precalentamiento diferido (${err.message}). Se conectará bajo demanda.`);
+  });
+}
 
 module.exports = {
   PRIMARY_VOICE,

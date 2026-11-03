@@ -16,6 +16,7 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.util.Log
+import uq.seminario.projects3.BuildConfig
 import java.util.Locale
 
 /**
@@ -37,6 +38,9 @@ class AudioEngine(
         const val SPEECH_RATE_SLOW = 0.85f
         const val SPEECH_RATE_NORMAL = 1.0f
         const val DEFAULT_WARM_PITCH = 0.95f
+
+        /** Código propio (no es de SpeechRecognizer): el dispositivo no tiene servicio de reconocimiento. */
+        const val ERROR_RECOGNITION_UNAVAILABLE = -100
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -45,6 +49,8 @@ class AudioEngine(
     private var speechRecognizer: SpeechRecognizer? = null
     private var textToSpeech: TextToSpeech? = null
     private var isTtsInitialized = false
+    // true si el motor TTS del sistema falló al iniciar: speak() avisa fin de inmediato
+    private var isTtsUnavailable = false
     private var pendingSpeechText: String? = null
 
     // --- Estado de Agencia y Controles de Voz del Usuario ---
@@ -139,7 +145,10 @@ class AudioEngine(
                     val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                     val text = matches?.firstOrNull()?.trim()
                     if (!text.isNullOrEmpty()) {
-                        Log.d("AudioEngine", "STT Resultado: $text")
+                        // El texto dictado puede contener datos de salud: solo se registra en debug
+                        if (BuildConfig.DEBUG) {
+                            Log.d("AudioEngine", "STT Resultado: $text")
+                        }
                         mainHandler.post {
                             onSpeechRecognized(text)
                         }
@@ -181,7 +190,13 @@ class AudioEngine(
                 if (speechRecognizer == null) {
                     initSpeechRecognizer()
                 }
-                speechRecognizer?.startListening(intent)
+                val recognizer = speechRecognizer
+                if (recognizer == null) {
+                    // Sin servicio de reconocimiento la pantalla quedaría en "Escuchando" para siempre
+                    onSpeechError(ERROR_RECOGNITION_UNAVAILABLE)
+                    return@post
+                }
+                recognizer.startListening(intent)
             } catch (e: Exception) {
                 Log.e("AudioEngine", "Error al iniciar STT", e)
                 onSpeechError(SpeechRecognizer.ERROR_CLIENT)
@@ -247,6 +262,19 @@ class AudioEngine(
                 @Deprecated("Deprecated in Java", ReplaceWith("Unit"))
                 override fun onError(utteranceId: String?) {
                     Log.w("AudioEngine", "TTS: Error en lectura: $utteranceId")
+                    notifyFinishedIfActive(utteranceId)
+                }
+
+                override fun onError(utteranceId: String?, errorCode: Int) {
+                    Log.w("AudioEngine", "TTS: Error en lectura: $utteranceId (código $errorCode)")
+                    notifyFinishedIfActive(utteranceId)
+                }
+
+                // Un error también termina la lectura: sin esto la UI seguiría mostrando "Pausar lectura"
+                private fun notifyFinishedIfActive(utteranceId: String?) {
+                    if (utteranceId != null && utteranceId == activeUtteranceId) {
+                        mainHandler.post { onTtsFinished() }
+                    }
                 }
             })
 
@@ -258,6 +286,12 @@ class AudioEngine(
             }
         } else {
             Log.e("AudioEngine", "Fallo al inicializar TextToSpeech. Código: $status")
+            isTtsUnavailable = true
+            // Una lectura que esperaba al motor nunca sonará: se da por terminada
+            if (pendingSpeechText != null) {
+                pendingSpeechText = null
+                mainHandler.post { onTtsFinished() }
+            }
         }
     }
 
@@ -341,6 +375,11 @@ class AudioEngine(
             return
         }
 
+        if (isTtsUnavailable) {
+            mainHandler.post { onTtsFinished() }
+            return
+        }
+
         if (!isTtsInitialized || textToSpeech == null) {
             pendingSpeechText = cleanText
             return
@@ -365,6 +404,11 @@ class AudioEngine(
 
         if (isVoiceMuted) {
             isVoiceMuted = false
+        }
+
+        if (isTtsUnavailable) {
+            mainHandler.post { onTtsFinished() }
+            return
         }
 
         if (!isTtsInitialized || textToSpeech == null) {

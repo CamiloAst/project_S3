@@ -69,7 +69,8 @@ fun RepairScreen(
     isPaused: Boolean = false,
     onBackClick: () -> Unit = onBackToHomeClick,
     onTogglePauseClick: () -> Unit = {},
-    onRepeatClick: () -> Unit = {}
+    onRepeatClick: () -> Unit = {},
+    hint: String = "Puedes hablar más despacio o acercarte un poco más al teléfono."
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -161,7 +162,7 @@ fun RepairScreen(
                     Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
-                        text = "Puedes hablar más despacio o acercarte un poco más al teléfono.",
+                        text = hint,
                         style = MaterialTheme.typography.bodyLarge.copy(
                             fontSize = 20.sp,
                             lineHeight = 28.sp,

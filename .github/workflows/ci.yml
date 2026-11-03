@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend (npm test)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+      - run: npm ci
+      - run: npm test
+
+  android:
+    name: Android (pruebas unitarias)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # Igual que toolchainVersion en gradle/gradle-daemon-jvm.properties (evita descargarlo en cada ejecución)
+          java-version: 25
+      # ubuntu-latest ya trae el SDK de Android (ANDROID_HOME) con licencias aceptadas;
+      # AGP descarga la plataforma que falte. android-actions/setup-android@v3 falla porque
+      # intenta instalar el paquete 'tools', que ya no existe en el SDK.
+      - uses: gradle/actions/setup-gradle@v4
+      # Las pruebas de EmergencyDetector leen backend/test/emergency-cases.json (ya en el checkout)
+      - run: ./gradlew :app:testDebugUnitTest --console=plain
