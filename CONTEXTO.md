@@ -46,21 +46,26 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Pantalla "Pensando" (`UiState.Thinking`) desde el fin de la voz hasta la respuesta: solo en pantalla, sin voz (Asignación), para no solaparse con la respuesta; a los 8 s cambia el mensaje para tranquilizar. Es transitoria como `Listening` (no entra en el historial de "Atrás").
 - El icono de escucha (barras + halo) sigue el volumen real de la voz (`onRmsChanged` → `voiceLevel`), leído en fase de dibujo para no recomponer la app.
 - Sin barra de estados de prueba: se quitó para las pruebas con usuarios reales.
+- Memoria de conversación de dos niveles, sin llamadas extra a Gemini: ventana de 20 mensajes (10 intercambios, `SESSION_MAX_MESSAGES`) y notas resumidas (`session.memory`, máx. 600 caracteres) que Gemini reescribe en cada turno en el campo interno `conversation_memory`. Ese campo se quita antes de responder, así que la app no cambia. La sesión sigue caducando a los 60 min de inactividad: recordar entre días exigiría alargar el TTL y que el consentimiento de las pruebas lo cubra.
 - `ACCESS_LOCAL_NETWORK` solo en el manifest de debug y pedido en `MainActivity` solo en debug con Android 17+: el backend de desarrollo vive en la red local; release usa una URL HTTPS pública y no lo necesita.
 
 ## 6. Estado actual
 - Correcciones de criticidad alta, media y baja integradas en `main` (PR #2, #3 y #4).
 - App preparada para pruebas con usuarios reales (rama `feat/pruebas-usuarios`): sin barra de prueba, con pantalla "Pensando" e icono de escucha reactivo a la voz.
-- Pruebas en verde al 2026-11-03: backend 19/19, `:app:testDebugUnitTest` 10/10, `ThinkingScreenTest` 3/3 en emulador.
+- Pruebas en verde al 2026-11-03: backend 22/22, `:app:testDebugUnitTest` 10/10, `ThinkingScreenTest` 3/3 en emulador.
 - El reconocimiento de voz ya funciona en el emulador (Android 17). Hasta este arreglo, la app nunca llegaba al backend (Android 17 bloqueaba `10.0.2.2`) y todas las respuestas eran del respaldo local. Con el permiso concedido, la conexión a `10.0.2.2:3000` funciona; falta ver una conversación completa respondida por Gemini.
+- La memoria resumida no se ha probado aún contra Gemini real (las pruebas corren sin clave). Se verifica con el log `🧠 [Memoria]` y `hasMemory` en `GET /api/chat/session/:sessionId`.
+- El guardrail médico responde «¿Quieres que contactemos a tu cuidador…?», lo que contradice la regla de no prometer contactar a nadie; pendiente de corregir.
 - Problemas conocidos: el `JAVA_HOME` global de esta máquina apunta a un JRE inexistente; `.idea/vcs.xml` aparece sin versionar (generado por Android Studio).
 
 ## 7. Próximos pasos
+- Comprobar con Gemini real que una conversación larga recuerda datos del principio y medir si la latencia sube.
 - Probar el flujo completo en un dispositivo físico contra el backend con Gemini real (voz real: animación del icono y pantalla "Pensando").
 - Definir la URL HTTPS de release y desplegar el backend con `API_ACCESS_TOKEN`.
 - Decidir si se versiona o se ignora `.idea/vcs.xml`.
 
 ## 8. Historial
+- **2026-11-03 (5)**: la app solo recordaba los 3 últimos intercambios. El historial pasa de 6 a 20 mensajes y se añade memoria resumida por sesión (`conversation_memory` → `session.memory`, inyectada en el prompt entre `"""` como datos). `hasMemory` en la ruta de sesión y 3 pruebas nuevas.
 - **2026-11-03 (4)**: Gemini devolvía 503 («high demand») en varios turnos. Se añaden reintentos con espera exponencial ante 5xx (`withGeminiRetries`, `GEMINI_MAX_RETRIES`) dentro del mismo plazo, con 4 pruebas nuevas. Se descartó cambiar de proveedor para no salir del nivel gratuito.
 - **2026-11-03 (3)**: diagnóstico de «el backend no muestra nada»: Android 17 (protección de red local) descartaba las conexiones de la app a `10.0.2.2` y la app respondía con su respaldo local. Se declara `ACCESS_LOCAL_NETWORK` en el manifest de debug y `MainActivity` lo pide en debug con Android 17+.
 - **2026-11-03 (2)**: preparación para pruebas con usuarios: eliminada la barra de estados de prueba (y sus funciones de demostración en el ViewModel), nueva pantalla `ThinkingScreen` (`UiState.Thinking`), icono de escucha con barras y halo que siguen el volumen de la voz, y se descartan resultados/errores tardíos del reconocedor. Pruebas: `VoiceLevelTest` (unitaria) y `ThinkingScreenTest` (UI).
