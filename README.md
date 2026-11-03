@@ -130,7 +130,8 @@ Consulta [backend/README.md](backend/README.md) para más detalles sobre endpoin
 La URL del backend y el token de acceso se configuran en `local.properties` (no se versiona), sin tocar el código:
 
 ```properties
-# Debug: por defecto http://10.0.2.2:3000/ (emulador). En un teléfono físico usa la IP de tu PC en la misma Wi-Fi.
+# Debug: por defecto http://10.0.2.2:3000/ (emulador). En un teléfono físico usa la IP de tu PC en la misma Wi-Fi
+# (o los scripts de "Pruebas con usuarios reales", que usan un túnel HTTPS).
 care.apiBaseUrl.debug=http://192.168.1.50:3000/
 # Release: obligatorio y solo HTTPS (el build release se detiene si falta)
 care.apiBaseUrl.release=https://tu-servidor.example/
@@ -139,7 +140,26 @@ care.apiToken=pega_aqui_el_token
 ```
 
 - El tráfico HTTP sin cifrar solo está permitido en builds **debug** (`app/src/debug/AndroidManifest.xml`); release exige HTTPS.
-- La barra "Modo de prueba" para forzar estados y los logs completos de red solo aparecen en builds **debug**.
+- Los logs completos de red solo aparecen en builds **debug**.
+
+## 🧪 Pruebas con usuarios reales
+
+Pensado para sesiones guiadas con un celular del equipo (Windows, desde la raíz del repositorio):
+
+1. **Una sola vez**: en el celular, activa las *Opciones de desarrollador* y la *Depuración por USB*; en el PC, instala `cloudflared` (`winget install --id Cloudflare.cloudflared`) y define `API_ACCESS_TOKEN` en `backend/.env` con el mismo valor que `care.apiToken`.
+2. **Al empezar cada jornada**, con el celular conectado por USB: `scripts\pruebas-usuarios\iniciar-pruebas.cmd`. El script:
+   - arranca el backend con `TRUST_PROXY=1`;
+   - comprueba que exige el token;
+   - abre un túnel HTTPS gratuito de Cloudflare;
+   - instala la app apuntando al túnel y concede los permisos;
+   - envía un mensaje de prueba y avisa si responde el banco de respaldo en vez de Gemini.
+
+   Luego se puede desconectar el cable: el celular funciona con Wi-Fi o datos móviles. Deja abiertas las ventanas "CARE backend" y "CARE túnel" hasta terminar.
+3. **Antes de cada participante**: `scripts\pruebas-usuarios\reiniciar-participante.cmd`. Borra la conversación y las notas de memoria del participante anterior en el backend, y los datos de la app (nuevo `sessionId`, vuelve a pedir el acompañante). También vacía el logcat y concede de nuevo los permisos.
+
+- La URL del túnel rápido cambia cada vez que se abre; por eso el script recompila e instala la app en cada jornada. Con un túnel de URL fija: `iniciar-pruebas.cmd -Url https://tu-dominio/`.
+- Se instala el build **debug**, que escribe en logcat el texto de la conversación: úsalo solo en el celular del equipo, no en los de los participantes.
+- Sin celular conectado, los scripts usan el emulador (sirve para ensayar).
 
 ## 🔐 Seguridad de la API
 

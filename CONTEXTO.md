@@ -25,6 +25,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
   - `services/emergencyDetector.js`, `services/sessionStore.js` (file/redis/memory), `services/ttsService.js` (una voz neural por acompañante, `VOICE_PROFILES`).
   - `middleware/security.js`: token Bearer y utilidades de privacidad de logs.
   - `test/`: pruebas del controlador, detector (casos compartidos en `emergency-cases.json`), seguridad y voces del TTS.
+- `scripts/pruebas-usuarios/`: scripts de Windows PowerShell 5.1 (con `.cmd` para doble clic) para las pruebas con usuarios reales. `iniciar-pruebas` prepara cada jornada: backend, túnel HTTPS e instalación en el celular. `reiniciar-participante` deja la app como recién instalada. `comun.ps1` reúne las funciones compartidas. Los `.ps1` se guardan en UTF-8 con BOM, porque sin él PowerShell 5.1 lee mal los acentos.
 
 ## 4. Cómo ejecutar
 - Backend (desde `backend/`): `npm install`, copiar `.env.example` a `.env` y definir `GEMINI_API_KEY`; `npm run dev` (puerto 3000); `npm test`.
@@ -33,6 +34,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Pruebas de UI en emulador (no corren en CI): `./gradlew :app:connectedDebugAndroidTest` (incluye `ThinkingScreenTest` y `AvatarSelectionScreenTest`). Ojo: esta tarea desinstala la app al terminar, así que se pierden los permisos concedidos y el acompañante elegido.
 - Configuración app ↔ backend en `local.properties`: `care.apiBaseUrl.debug`, `care.apiBaseUrl.release` (HTTPS obligatorio), `care.apiToken` (igual a `API_ACCESS_TOKEN`).
 - Android 17+ (`targetSdk = 37`): la app debug pide al abrirse el permiso «Dispositivos cercanos / red local» (`ACCESS_LOCAL_NETWORK`). Si se deniega, no llega al backend (ni siquiera a `10.0.2.2`) y todas las respuestas salen del respaldo local. Alternativa sin permiso: `adb reverse tcp:3000 tcp:3000` y `care.apiBaseUrl.debug=http://127.0.0.1:3000/`.
+- Pruebas con usuarios reales en un celular del equipo (detalle en el README): `scripts\pruebas-usuarios\iniciar-pruebas.cmd` al empezar cada jornada, con el celular por USB; necesita `cloudflared` y `API_ACCESS_TOKEN`. Antes de cada participante: `scripts\pruebas-usuarios\reiniciar-participante.cmd`. Admiten `-Serial`; `iniciar-pruebas` también admite `-Url` (túnel propio) y `-SinPruebaChat`.
 - Comprobar la voz neural: `GET /api/health` → `tts.stats` (`neural` = audios entregados; `retries`, `failures`, `skipped` = intentos fallidos o sin plazo; `lastError`). En consola, `🎙️ [Neural TTS] ... intento N` o `🔁 [Neural TTS] Intento N/2 falló` y `⚠️ [Neural TTS Fallback]` (la app usará su voz local, más robótica).
 - Comprobar que responde Gemini: cada mensaje que llega deja en la consola del backend `POST /api/chat`, `⚡ [Gemini LLM Latency]` y `🎯 [Gemini Emotion]` (o `🛡️ [Fallback Activado]`); `GET /api/health` muestra `aiProvider.stats.gemini`, `stats.retries`, `lastSuccessAt` y `lastError`. Los reintentos aparecen como `🔁 [Gemini Retry]`. En logcat (`ChatbotViewModel`), «Respuesta CARE recibida» = backend; «Aplicando respaldo CARE local» = no llegó. Consola del backend en silencio = la petición no llegó.
 
@@ -54,6 +56,14 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - La voz sigue al acompañante: la app envía `companion` (`"female"` | `"male"`) en `POST /api/chat`; el backend usa Salomé o Gonzalo (Edge TTS, gratis, un cliente precalentado por voz) y añade al prompt de cada turno el género con el que el asistente habla de sí. `companion` es opcional y un valor desconocido usa `"female"` sin dar 400, para que una app vieja o nueva nunca caiga al respaldo por esto. Los textos fijos (banco, respaldo local, valores por defecto) se reescribieron sin género ("Estoy aquí" en vez de "Estoy listo") para servir a ambos sin duplicar el banco. El TTS local de respaldo no sabe el género de las voces de Android: para el compañero solo baja el tono (0.8).
 - Voz neural más fiable y natural (medido el 2026-11-03): Edge gratis cierra el WebSocket tras 20-60 s sin uso (casi cada turno reconecta, ~0,9 s) y a veces tarda más de 10 s en conectar o corta el audio. Antes, con 1,95 s de margen y sin reintento, esos casos caían a la voz robótica de Android. Ahora: reconexión anticipada mientras Gemini piensa (`prewarmTts`), plazos por intento de 3,5 s (conexión) / 3 s (primer audio) / 8 s (total), un reintento con conexión nueva y todo dentro de los 18 s del presupuesto. Un stream que se cierra sin terminar se reintenta en vez de entregar audio cortado. Además, MP3 a 96 kbps (antes 48) y prosodia más suave (0 % a -10 % en vez de -8 % a -18 %), porque ralentizar mucho la voz neural la hace sonar estirada.
 - "Cambiar acompañante" en inicio es un botón con borde (antes un enlace de texto que pasaba desapercibido) y tocar el avatar en inicio también abre la elección.
+- Pruebas con usuarios: sesiones guiadas con un celular del equipo y un túnel rápido de Cloudflare (gratis, sin cuenta, HTTPS y válido con datos móviles). Se descartaron la Wi-Fi local, porque las redes universitarias suelen aislar los dispositivos, y el hosting gratuito, porque se duerme y el primer mensaje superaría los 25 s de la app.
+  - La URL del túnel se pasa a Gradle con `-P` y no se escribe en `local.properties`, para no dejar el emulador apuntando a un túnel cerrado. Por eso el script se detiene si `local.properties` define `care.apiBaseUrl.debug`, que tendría prioridad.
+  - El script no abre el túnel si el backend no exige token.
+  - Arranca el backend con `node server.js` (sin `--watch`, que lo reinicia a mitad de una respuesta) y `TRUST_PROXY=1`.
+- Reinicio entre participantes: el `sessionId` es uno por instalación, así que en un celular compartido el siguiente participante heredaría el historial y las notas de memoria del anterior. `reiniciar-participante`:
+  - lee el `sessionId` con `run-as` (solo posible en debug) y borra esa sesión del backend;
+  - hace `pm clear` y `logcat -c`;
+  - vuelve a conceder los permisos con `pm grant`, para que el participante no vea diálogos.
 
 ## 6. Estado actual
 - Correcciones de criticidad alta, media y baja integradas en `main` (PR #2, #3 y #4).
@@ -63,9 +73,16 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - El reconocimiento de voz ya funciona en el emulador (Android 17). Hasta este arreglo, la app nunca llegaba al backend (Android 17 bloqueaba `10.0.2.2`) y todas las respuestas eran del respaldo local. Con el permiso concedido, la conexión a `10.0.2.2:3000` funciona; falta ver una conversación completa respondida por Gemini.
 - La memoria resumida no se ha probado aún contra Gemini real (las pruebas corren sin clave). Se verifica con el log `🧠 [Memoria]` y `hasMemory` en `GET /api/chat/session/:sessionId`.
 - El guardrail médico responde «¿Quieres que contactemos a tu cuidador…?», lo que contradice la regla de no prometer contactar a nadie; pendiente de corregir.
+- Scripts de pruebas con usuarios (2026-11-03), probados en el emulador:
+  - `reiniciar-participante` funciona completo: borra la sesión, la app abre en la elección de acompañante y los permisos quedan concedidos sin diálogos.
+  - De `iniciar-pruebas` funcionan las comprobaciones previas, la reutilización del backend, la verificación del token y la compilación e instalación con `-P`.
+  - **Sin probar**: el túnel de Cloudflare (`cloudflared` no está instalado en este PC) y el mensaje de prueba a través del túnel. Nada se ha probado aún en un celular físico.
+- El 2026-11-03 la cuota gratuita de Gemini estaba agotada (`fallback_reason: quota_exceeded`): todas las respuestas salían del banco de respaldo.
 - Problemas conocidos: el `JAVA_HOME` global de esta máquina apunta a un JRE inexistente; `.idea/vcs.xml` aparece sin versionar (generado por Android Studio).
 
 ## 7. Próximos pasos
+- Instalar `cloudflared` y ensayar `iniciar-pruebas.cmd` con el celular del equipo: que `/quicktunnel` devuelva la URL y que el mensaje de prueba llegue por el túnel.
+- Corregir el guardrail médico («¿Quieres que contactemos a tu cuidador…?») antes de las pruebas con personas reales.
 - Escuchar las muestras de `muestras-voz/` y, si otra voz suena más natural (p. ej. las multilingües de Edge), fijarla con `EDGE_TTS_VOICE` / `EDGE_TTS_VOICE_MALE` sin tocar código. Revisar `tts.stats` en `/api/health` tras una sesión real.
 - Probar con Gemini real y en un teléfono que el compañero habla con voz y género masculinos; si el tono bajo del respaldo local suena mal, buscar en `tts.voices` una voz masculina conocida del motor de Google.
 - Los textos fijos aún tratan al usuario en masculino genérico ("tranquilo", "acompañado"); el género del usuario no se conoce.
@@ -76,6 +93,11 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Decidir si se versiona o se ignora `.idea/vcs.xml`.
 
 ## 8. Historial
+- **2026-11-03 (9)**: preparación de las pruebas con usuarios reales. Nuevos scripts en `scripts/pruebas-usuarios/`:
+  - `iniciar-pruebas`: backend con `TRUST_PROXY=1`, comprobación del token, túnel de Cloudflare, instalación con `-P`, permisos y mensaje de prueba;
+  - `reiniciar-participante`: borra la sesión en el backend, hace `pm clear` y `logcat -c` y vuelve a conceder los permisos.
+
+  Nueva sección en el README; se quitó la mención a la barra "Modo de prueba", que ya no existe. Probado en el emulador salvo el túnel.
 - **2026-11-03 (8)**: fallos intermitentes del audio neural: medido que Edge cierra la conexión por inactividad y a veces conecta muy lento; se añaden reconexión anticipada, reintento con plazos por intento dentro del presupuesto, `tts.stats` en `/api/health`, MP3 a 96 kbps y prosodia más suave. Botón visible "Cambiar acompañante" y avatar tocable en inicio. Muestras de voz para comparar en `muestras-voz/` (no versionadas).
 - **2026-11-03 (7)**: la voz sigue al acompañante. Campo opcional `companion` en `POST /api/chat`; `ttsService.js` pasa de un cliente compartido a uno por voz (Salomé / Gonzalo) con caché por acompañante; el prompt de cada turno indica el género; textos fijos sin género; tono bajo del TTS local para el compañero. Pruebas: 5 nuevas en el backend (`ttsService.test.js` y del controlador) y 1 en la app.
 - **2026-11-03 (6)**: pantalla de elección de acompañante (`AvatarSelectionScreen`, `UiState.ChoosingAvatar`) con dos avatares (compañero y compañera). El elegido se guarda y aparece en todas las pantallas (`AssistantAvatarBadge`, con ondas mientras habla); "Cambiar acompañante" en inicio. Pruebas: `AssistantAvatarTest` (unitaria) y `AvatarSelectionScreenTest` (UI).
