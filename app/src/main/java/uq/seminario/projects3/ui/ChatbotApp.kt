@@ -15,21 +15,10 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -38,13 +27,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.Lifecycle
@@ -52,21 +36,15 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import uq.seminario.projects3.BuildConfig
 import uq.seminario.projects3.ui.components.AudioPermissionDialog
 import uq.seminario.projects3.ui.screens.BotResponseScreen
 import uq.seminario.projects3.ui.screens.DecisionScreen
 import uq.seminario.projects3.ui.screens.EmergencyScreen
 import uq.seminario.projects3.ui.screens.RecommendationScreen
 import uq.seminario.projects3.ui.screens.RepairScreen
+import uq.seminario.projects3.ui.screens.ThinkingScreen
 import uq.seminario.projects3.ui.screens.VoiceInputScreen
-import uq.seminario.projects3.ui.theme.ActionDarkBlue
 import uq.seminario.projects3.ui.theme.BeigeBackground
-import uq.seminario.projects3.ui.theme.DarkText
-import uq.seminario.projects3.ui.theme.EmergencyRed
-import uq.seminario.projects3.ui.theme.ListeningTerracotta
-import uq.seminario.projects3.ui.theme.PrimaryDarkGreen
-import uq.seminario.projects3.ui.theme.SereneCalmAccent
 import uq.seminario.projects3.ui.theme.SereneWarmBackground
 import uq.seminario.projects3.viewmodel.ChatbotViewModel
 import uq.seminario.projects3.viewmodel.UiState
@@ -95,6 +73,9 @@ fun ChatbotApp(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val isPaused by viewModel.isPaused.collectAsStateWithLifecycle()
     val showPermissionDialog by viewModel.showPermissionDialog.collectAsStateWithLifecycle()
+    // Se pasa como State (sin delegar) para que el volumen, que cambia muchas veces por
+    // segundo, solo recomponga el botón del micrófono y no toda la app
+    val voiceLevel = viewModel.voiceLevel.collectAsStateWithLifecycle()
 
     // Soporte del botón físico/sistema "Atrás" de Android en todas las pantallas excepto Idle
     BackHandler(enabled = uiState != UiState.Idle) {
@@ -199,33 +180,7 @@ fun ChatbotApp(
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = containerBackgroundColor,
-        bottomBar = {
-            // Barra de pruebas para forzar cada estado: nunca visible en builds release
-            if (BuildConfig.DEBUG) DemoStateSwitcherBar(
-                currentState = uiState,
-                onSelectIdle = { viewModel.navigateHome() },
-                onSelectListening = {
-                    viewModel.onMicClicked(
-                        hasPermission = hasAudioPermission,
-                        onRequestPermission = {
-                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                        }
-                    )
-                },
-                onSelectSpeaking = { viewModel.stopListeningAndSpeak() },
-                onSelectAffective = {
-                    viewModel.stopListeningAndSpeak(
-                        screenText = "Acompañamiento cálido en todo momento",
-                        spokenText = "Comprendo que hoy el día se sienta silencioso para ti. Estoy aquí a tu lado para acompañarte. Inhala despacio y exhala con calma.",
-                        userEmotion = "NEGATIVA_TRISTEZA_SOLEDAD"
-                    )
-                },
-                onSelectDecision = { viewModel.askDecision() },
-                onSelectRepair = { viewModel.showRepairState() },
-                onSelectEmergency = { viewModel.showEmergencyState() }
-            )
-        }
+        containerColor = containerBackgroundColor
     ) { innerPadding ->
         Box(
             modifier = Modifier
@@ -261,6 +216,7 @@ fun ChatbotApp(
                     is UiState.Listening -> {
                         VoiceInputScreen(
                             isListening = true,
+                            voiceLevel = { voiceLevel.value },
                             onMicClick = {
                                 viewModel.onMicClicked(
                                     hasPermission = hasAudioPermission,
@@ -272,6 +228,13 @@ fun ChatbotApp(
                             onBackClick = { viewModel.navigateBack() },
                             onHomeClick = { viewModel.navigateHome() },
                             onExitClick = { (context as? Activity)?.finish() }
+                        )
+                    }
+
+                    is UiState.Thinking -> {
+                        ThinkingScreen(
+                            onBackClick = { viewModel.navigateBack() },
+                            onHomeClick = { viewModel.navigateHome() }
                         )
                     }
 
@@ -376,121 +339,6 @@ fun ChatbotApp(
                         )
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DemoStateSwitcherBar(
-    currentState: UiState,
-    onSelectIdle: () -> Unit,
-    onSelectListening: () -> Unit,
-    onSelectSpeaking: () -> Unit,
-    onSelectAffective: () -> Unit,
-    onSelectDecision: () -> Unit,
-    onSelectRepair: () -> Unit,
-    onSelectEmergency: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        modifier = modifier.fillMaxWidth(),
-        color = Color(0xFFEBE6DC),
-        shadowElevation = 8.dp
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp)
-        ) {
-            Text(
-                text = "Modo de prueba (Estados del Chatbot CARE):",
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 12.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = DarkText
-                ),
-                modifier = Modifier.padding(bottom = 2.dp)
-            )
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState()),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                FilterChip(
-                    selected = currentState is UiState.Idle,
-                    onClick = onSelectIdle,
-                    label = { Text("1. Reposo", fontSize = 13.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = PrimaryDarkGreen,
-                        selectedLabelColor = Color.White
-                    )
-                )
-
-                FilterChip(
-                    selected = currentState is UiState.Listening,
-                    onClick = onSelectListening,
-                    label = { Text("2. Escuchando", fontSize = 13.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = ListeningTerracotta,
-                        selectedLabelColor = Color.White
-                    )
-                )
-
-                FilterChip(
-                    selected = currentState is UiState.Speaking &&
-                            !isAffectiveEmotion(currentState.userEmotion),
-                    onClick = onSelectSpeaking,
-                    label = { Text("3. Bot Habla", fontSize = 13.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = ActionDarkBlue,
-                        selectedLabelColor = Color.White
-                    )
-                )
-
-                FilterChip(
-                    selected = currentState is UiState.Speaking &&
-                            isAffectiveEmotion(currentState.userEmotion),
-                    onClick = onSelectAffective,
-                    label = { Text("4. Afectivo (Calma)", fontSize = 13.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = SereneCalmAccent,
-                        selectedLabelColor = Color.White
-                    )
-                )
-
-                FilterChip(
-                    selected = currentState is UiState.AwaitingDecision,
-                    onClick = onSelectDecision,
-                    label = { Text("5. Decisión", fontSize = 13.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = ActionDarkBlue,
-                        selectedLabelColor = Color.White
-                    )
-                )
-
-                FilterChip(
-                    selected = currentState is UiState.Repair,
-                    onClick = onSelectRepair,
-                    label = { Text("6. Lupa (Reparación)", fontSize = 13.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = ListeningTerracotta,
-                        selectedLabelColor = Color.White
-                    )
-                )
-
-                FilterChip(
-                    selected = currentState is UiState.Emergency,
-                    onClick = onSelectEmergency,
-                    label = { Text("7. Emergencia (sin llamadas)", fontSize = 13.sp) },
-                    colors = FilterChipDefaults.filterChipColors(
-                        selectedContainerColor = EmergencyRed,
-                        selectedLabelColor = Color.White
-                    )
-                )
             }
         }
     }

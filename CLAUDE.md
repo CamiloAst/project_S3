@@ -54,12 +54,12 @@ CI (`.github/workflows/ci.yml`) runs `npm test` and `:app:testDebugUnitTest` on 
 User text must not reach logs by default: backend logs go through `userTextForLog()` (full text only with `LOG_USER_TEXT=true`), and Android logs containing conversation content are wrapped in `if (BuildConfig.DEBUG)`.
 
 ### App ↔ backend configuration
-Android reads, from `local.properties` (not versioned) or `-P`: `care.apiBaseUrl.debug` (default `http://10.0.2.2:3000/`), `care.apiBaseUrl.release` (must be HTTPS) and `care.apiToken`, exposed as `BuildConfig.CARE_API_BASE_URL` / `CARE_API_TOKEN`. `care.apiToken` must equal the backend's `API_ACCESS_TOKEN` (required when `NODE_ENV=production`); the app sends it as `Authorization: Bearer`. Cleartext HTTP is allowed only by `app/src/debug/AndroidManifest.xml`. The `DemoStateSwitcherBar` and full HTTP body logging exist only in debug builds.
+Android reads, from `local.properties` (not versioned) or `-P`: `care.apiBaseUrl.debug` (default `http://10.0.2.2:3000/`), `care.apiBaseUrl.release` (must be HTTPS) and `care.apiToken`, exposed as `BuildConfig.CARE_API_BASE_URL` / `CARE_API_TOKEN`. `care.apiToken` must equal the backend's `API_ACCESS_TOKEN` (required when `NODE_ENV=production`); the app sends it as `Authorization: Bearer`. Cleartext HTTP is allowed only by `app/src/debug/AndroidManifest.xml`. Full HTTP body logging exists only in debug builds.
 
 ## Architecture
 
 ### Request flow
-1. `AudioEngine` (Android SpeechRecognizer) transcribes speech → `ChatbotViewModel.handleSpeechRecognitionResult`.
+1. `AudioEngine` (Android SpeechRecognizer) transcribes speech → `ChatbotViewModel.handleSpeechRecognitionResult`. While listening, `onRmsChanged` feeds `voiceLevel` (0–1, `AudioEngine.normalizeRmsDb`) that animates the mic icon's bars and halo; end of speech (or tapping the mic) switches to `UiState.Thinking` (`ThinkingScreen`) until the answer arrives. Recognizer results/errors that arrive outside `Listening`/`Thinking` are ignored.
 2. `ChatApiClient` (Retrofit) `POST /api/chat` with `{ message, sessionId }` and the bearer token. `server.js` applies a per-IP rate limit and `requireApiToken` (`middleware/security.js`) before the controller.
 3. `backend/controllers/chatController.js` `handleChat`:
    - pre-LLM emergency check (`isCriticalRisk` from `services/emergencyDetector.js`) → short-circuits to `source: "emergency_guardrail"`;
@@ -88,4 +88,4 @@ Response `data` fields: `spoken_text`, `screen_text`, `user_emotion` (`POSITIVA`
 `ChatbotApp` observes the lifecycle: ON_STOP (ignored during configuration changes) calls `onAppBackgrounded()`, which cancels listening and pauses audio; ON_START calls `onAppForegrounded()` and re-reads the mic permission. While in background, async responses start paused (`startsPaused()`, `speakIfForeground()`); only `emergency_alert` plays anyway (`playInBackground = true`).
 
 ### UI navigation
-`ChatbotViewModel` keeps its own back stack (`stateHistory: ArrayDeque<UiState>`); `ChatbotApp.kt` renders one screen per `UiState` inside `AnimatedContent` and wires `BackHandler` to `navigateBack()`. `UiState` is a sealed interface, so adding a state requires handling it in `ChatbotApp`'s `when`, `onMicClicked`, `navigateBack` and `resolveCurrentSpokenText`. The bottom `DemoStateSwitcherBar` in `ChatbotApp.kt` is a test-mode tool that forces each state (including Emergency).
+`ChatbotViewModel` keeps its own back stack (`stateHistory: ArrayDeque<UiState>`); `ChatbotApp.kt` renders one screen per `UiState` inside `AnimatedContent` and wires `BackHandler` to `navigateBack()`. `UiState` is a sealed interface, so adding a state requires handling it in `ChatbotApp`'s `when`, `onMicClicked`, `navigateBack` and `resolveCurrentSpokenText`. `Listening` and `Thinking` are transient: `transitionToState` never pushes them to `stateHistory`. There is no on-screen state switcher (removed for tests with real users); `ThinkingScreenTest` (androidTest) covers the Thinking screen.

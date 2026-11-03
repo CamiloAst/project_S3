@@ -22,7 +22,8 @@ import java.util.Locale
 /**
  * Motor de audio bidireccional accesible para adultos mayores.
  * Integra:
- * 1. Speech-to-Text (STT) con tolerancia ampliada a pausas en el habla y cancelación inmediata.
+ * 1. Speech-to-Text (STT) con tolerancia ampliada a pausas en el habla, cancelación inmediata
+ *    y nivel de volumen de la voz para animar el icono de escucha.
  * 2. Text-to-Speech (TTS) en español con control de velocidad (0.80f Pausado / 1.0f Normal),
  *    repetición de última locución (lastSpokenText), pausa/continuación y silenciamiento (Mute).
  * 3. Retroalimentación háptica suave para confirmación física del toque.
@@ -31,6 +32,8 @@ class AudioEngine(
     private val context: Context,
     private val onSpeechRecognized: (String) -> Unit,
     private val onSpeechError: (Int) -> Unit,
+    private val onSpeechEnded: () -> Unit,
+    private val onVoiceLevelChanged: (Float) -> Unit,
     private val onTtsFinished: () -> Unit
 ) : TextToSpeech.OnInitListener {
 
@@ -43,6 +46,17 @@ class AudioEngine(
         const val ERROR_RECOGNITION_UNAVAILABLE = -100
 
         private const val DEFAULT_RECOGNITION_LANGUAGE = "es-CO"
+
+        // Rango útil de onRmsChanged: el reconocedor de Google ronda 0 dB o menos en silencio
+        // y ~10 dB con voz fuerte; algunos motores dan valores mayores, que se recortan a 1
+        private const val RMS_DB_SILENCE = 0f
+        private const val RMS_DB_LOUD = 10f
+
+        /** Convierte el `rmsdB` de SpeechRecognizer en un nivel de voz de 0 (silencio) a 1 (voz fuerte). */
+        fun normalizeRmsDb(rmsdB: Float): Float {
+            if (rmsdB.isNaN()) return 0f
+            return ((rmsdB - RMS_DB_SILENCE) / (RMS_DB_LOUD - RMS_DB_SILENCE)).coerceIn(0f, 1f)
+        }
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -128,12 +142,21 @@ class AudioEngine(
                     Log.d("AudioEngine", "STT: El usuario comenzó a hablar")
                 }
 
-                override fun onRmsChanged(rmsdB: Float) {}
+                override fun onRmsChanged(rmsdB: Float) {
+                    // Volumen de la voz: anima el icono de escucha mientras el usuario habla
+                    val level = normalizeRmsDb(rmsdB)
+                    mainHandler.post {
+                        onVoiceLevelChanged(level)
+                    }
+                }
 
                 override fun onBufferReceived(buffer: ByteArray?) {}
 
                 override fun onEndOfSpeech() {
                     Log.d("AudioEngine", "STT: Fin de entrada de voz")
+                    mainHandler.post {
+                        onSpeechEnded()
+                    }
                 }
 
                 override fun onError(error: Int) {

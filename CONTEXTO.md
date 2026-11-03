@@ -17,7 +17,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
   - `safety/EmergencyDetector.kt`: detector local de frases de emergencia.
   - `session/SessionIdProvider.kt`: `sessionId` único por instalación.
   - `viewmodel/ChatbotViewModel.kt`: máquina de estados `UiState`, pila de navegación, fallback local.
-  - `ui/ChatbotApp.kt`, `ui/screens/*`, `ui/components/*`: pantallas Compose y barra de demostración (solo debug).
+  - `ui/ChatbotApp.kt`, `ui/screens/*`, `ui/components/*`: pantallas Compose (incluida `ThinkingScreen`, espera mientras la IA responde).
 - `backend/`
   - `server.js`: Express, rate limit, rutas `/api/chat` y de sesión.
   - `controllers/chatController.js`: guardarraíl de emergencia, Gemini, banco de respuestas de respaldo, saneamiento.
@@ -29,6 +29,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Backend (desde `backend/`): `npm install`, copiar `.env.example` a `.env` y definir `GEMINI_API_KEY`; `npm run dev` (puerto 3000); `npm test`.
   Variables útiles: `API_ACCESS_TOKEN` (obligatoria con `NODE_ENV=production`), `SESSION_STORE`, `EDGE_TTS_ENABLED`, `LOG_USER_TEXT`.
 - Android (desde la raíz): `./gradlew assembleDebug`, `./gradlew :app:testDebugUnitTest`. En este Windows usar el JDK de Android Studio (`JAVA_HOME=E:\Program Files\Android\Android Studio\jbr` y `-Dorg.gradle.java.home=...`).
+- Pruebas de UI en emulador (no corren en CI): `./gradlew :app:connectedDebugAndroidTest` (incluye `ThinkingScreenTest`).
 - Configuración app ↔ backend en `local.properties`: `care.apiBaseUrl.debug`, `care.apiBaseUrl.release` (HTTPS obligatorio), `care.apiToken` (igual a `API_ACCESS_TOKEN`).
 
 ## 5. Decisiones
@@ -39,17 +40,23 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - El texto del usuario no se escribe en logs por defecto (`userTextForLog()`, logs Android solo en debug).
 - En segundo plano se pausa el audio y el micrófono; solo una alerta de emergencia suena igualmente.
 - `.idea/deploymentTargetSelector.xml` fuera de git (es local de cada equipo).
+- Pantalla "Pensando" (`UiState.Thinking`) desde el fin de la voz hasta la respuesta: solo en pantalla, sin voz (Asignación), para no solaparse con la respuesta; a los 8 s cambia el mensaje para tranquilizar. Es transitoria como `Listening` (no entra en el historial de "Atrás").
+- El icono de escucha (barras + halo) sigue el volumen real de la voz (`onRmsChanged` → `voiceLevel`), leído en fase de dibujo para no recomponer la app.
+- Sin barra de estados de prueba: se quitó para las pruebas con usuarios reales.
 
 ## 6. Estado actual
 - Correcciones de criticidad alta, media y baja integradas en `main` (PR #2, #3 y #4).
-- Pruebas en verde al 2026-11-03: backend 15/15, `:app:testDebugUnitTest` OK.
+- App preparada para pruebas con usuarios reales: sin barra de prueba, con pantalla "Pensando" e icono de escucha reactivo a la voz (sin commit todavía).
+- Pruebas en verde al 2026-11-03: backend 15/15, `:app:testDebugUnitTest` 10/10, `ThinkingScreenTest` 3/3 en emulador.
+- Sin verificar con voz real: en el emulador el reconocedor falla al instante (código 7), así que la animación con voz y la pantalla "Pensando" solo se comprobaron con niveles simulados en pruebas de UI.
 - Problemas conocidos: el `JAVA_HOME` global de esta máquina apunta a un JRE inexistente; `.idea/vcs.xml` aparece sin versionar (generado por Android Studio).
 
 ## 7. Próximos pasos
-- Probar el flujo completo en emulador o dispositivo contra el backend con Gemini real.
+- Probar el flujo completo en un dispositivo físico contra el backend con Gemini real (voz real: animación del icono y pantalla "Pensando").
 - Definir la URL HTTPS de release y desplegar el backend con `API_ACCESS_TOKEN`.
 - Decidir si se versiona o se ignora `.idea/vcs.xml`.
 
 ## 8. Historial
+- **2026-11-03 (2)**: preparación para pruebas con usuarios: eliminada la barra de estados de prueba (y sus funciones de demostración en el ViewModel), nueva pantalla `ThinkingScreen` (`UiState.Thinking`), icono de escucha con barras y halo que siguen el volumen de la voz, y se descartan resultados/errores tardíos del reconocedor. Pruebas: `VoiceLevelTest` (unitaria) y `ThinkingScreenTest` (UI).
 - **2026-11-03**: PR #4 (criticidad baja) fusionado: validación de `sessionId` en rutas de sesión, idioma de reconocimiento según el teléfono, pausa en segundo plano, `screen_text` de 4–7 palabras, diálogo "Abrir ajustes" para el micrófono y limpieza. Creado este `CONTEXTO.md`.
 - **Anteriores**: commit inicial; PR #2 (criticidad alta) y PR #3 (criticidad media: robustez de red y voz, privacidad de logs, pruebas del controlador y CI).
