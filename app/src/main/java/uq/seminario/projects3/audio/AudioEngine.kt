@@ -14,14 +14,16 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import android.util.Log
 import java.util.Locale
 
 /**
  * Motor de audio bidireccional accesible para adultos mayores.
  * Integra:
- * 1. Speech-to-Text (STT) con tolerancia ampliada a pausas en el habla.
- * 2. Text-to-Speech (TTS) en español a velocidad reducida (0.85f).
+ * 1. Speech-to-Text (STT) con tolerancia ampliada a pausas en el habla y cancelación inmediata.
+ * 2. Text-to-Speech (TTS) en español con control de velocidad (0.80f Pausado / 1.0f Normal),
+ *    repetición de última locución (lastSpokenText), pausa/continuación y silenciamiento (Mute).
  * 3. Retroalimentación háptica suave para confirmación física del toque.
  */
 class AudioEngine(
@@ -31,6 +33,12 @@ class AudioEngine(
     private val onTtsFinished: () -> Unit
 ) : TextToSpeech.OnInitListener {
 
+    companion object {
+        const val SPEECH_RATE_SLOW = 0.85f
+        const val SPEECH_RATE_NORMAL = 1.0f
+        const val DEFAULT_WARM_PITCH = 0.95f
+    }
+
     private val mainHandler = Handler(Looper.getMainLooper())
 
     // --- Componentes Hardware / Servicios del Sistema ---
@@ -38,6 +46,20 @@ class AudioEngine(
     private var textToSpeech: TextToSpeech? = null
     private var isTtsInitialized = false
     private var pendingSpeechText: String? = null
+
+    // --- Estado de Agencia y Controles de Voz del Usuario ---
+    @Volatile
+    private var currentSpeechRate: Float = SPEECH_RATE_SLOW
+
+    @Volatile
+    private var isVoiceMuted: Boolean = false
+
+    @Volatile
+    private var lastSpokenText: String =
+        "Claro. Tu cita médica está programada para mañana a las diez y media de la mañana en el centro de salud San José."
+
+    @Volatile
+    private var activeUtteranceId: String? = null
 
     // Servicio háptico adaptativo según versión de Android
     private val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -62,17 +84,17 @@ class AudioEngine(
     // =========================================================================
 
     /**
-     * Emite una vibración suave (80ms) para confirmar al usuario que su toque fue recibido.
+     * Emite una vibración suave (70ms) para confirmar al adulto mayor que su toque fue recibido.
      */
     fun triggerHapticFeedback() {
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 vibrator?.vibrate(
-                    VibrationEffect.createOneShot(80L, VibrationEffect.DEFAULT_AMPLITUDE)
+                    VibrationEffect.createOneShot(70L, VibrationEffect.DEFAULT_AMPLITUDE)
                 )
             } else {
                 @Suppress("DEPRECATION")
-                vibrator?.vibrate(80L)
+                vibrator?.vibrate(70L)
             }
         } catch (e: Exception) {
             Log.w("AudioEngine", "No se pudo emitir retroalimentación háptica", e)
@@ -109,7 +131,6 @@ class AudioEngine(
 
                 override fun onError(error: Int) {
                     Log.w("AudioEngine", "STT Error código: $error")
-                    // Se delega el error al ViewModel para activar el estado de reparación silencioso
                     mainHandler.post {
                         onSpeechError(error)
                     }
@@ -170,7 +191,7 @@ class AudioEngine(
     }
 
     /**
-     * Detiene la escucha activa.
+     * Detiene la escucha activa procesando lo capturado hasta el momento.
      */
     fun stopListening() {
         mainHandler.post {
@@ -182,46 +203,56 @@ class AudioEngine(
         }
     }
 
+    /**
+     * Cancela inmediatamente el reconocedor de voz (speechRecognizer.cancel()).
+     */
+    fun cancelListening() {
+        mainHandler.post {
+            try {
+                speechRecognizer?.stopListening()
+                speechRecognizer?.cancel()
+            } catch (e: Exception) {
+                Log.w("AudioEngine", "Error al cancelar STT", e)
+            }
+        }
+    }
+
     // =========================================================================
-    // 3. TEXT-TO-SPEECH (TTS)
+    // 3. TEXT-TO-SPEECH (TTS) Y CONTROLES DE ACCESIBILIDAD
     // =========================================================================
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            val localeSpanish = Locale.forLanguageTag("es-ES")
-            val result = textToSpeech?.setLanguage(localeSpanish)
-
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                // Intento con español genérico
-                textToSpeech?.setLanguage(Locale.forLanguageTag("es"))
+            val tts = textToSpeech
+            if (tts != null) {
+                configureHighQualitySpanishVoice(tts)
+                tts.setPitch(DEFAULT_WARM_PITCH)
+                tts.setSpeechRate(0.85f)
+                currentSpeechRate = 0.85f
             }
 
-            // Velocidad reducida a 0.85f para facilitar la comprensión auditiva
-            textToSpeech?.setSpeechRate(0.85f)
-            textToSpeech?.setPitch(1.0f)
-
-            // Listener de fin de lectura
             textToSpeech?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     Log.d("AudioEngine", "TTS: Iniciando lectura: $utteranceId")
                 }
 
                 override fun onDone(utteranceId: String?) {
-                    Log.d("AudioEngine", "TTS: Lectura completada")
-                    mainHandler.post {
-                        onTtsFinished()
+                    if (utteranceId != null && utteranceId == activeUtteranceId) {
+                        Log.d("AudioEngine", "TTS: Lectura completada: $utteranceId")
+                        mainHandler.post {
+                            onTtsFinished()
+                        }
                     }
                 }
 
                 @Deprecated("Deprecated in Java", ReplaceWith("Unit"))
                 override fun onError(utteranceId: String?) {
-                    Log.w("AudioEngine", "TTS: Error en lectura")
+                    Log.w("AudioEngine", "TTS: Error en lectura: $utteranceId")
                 }
             })
 
             isTtsInitialized = true
 
-            // Si había un texto en cola antes de que terminara la inicialización
             pendingSpeechText?.let {
                 speak(it)
                 pendingSpeechText = null
@@ -232,22 +263,169 @@ class AudioEngine(
     }
 
     /**
-     * Lee un texto en voz alta en español a 0.85f de velocidad.
+     * Busca en `tts.voices` una voz en español (`es-CO`, `es-MX`, `es-US` o `es-ES`)
+     * con `quality >= Voice.QUALITY_HIGH` (preferiblemente con "network" o "wavenet" en el nombre)
+     * y ajusta `pitch = 0.95f` y `speechRate = 0.85f` para eliminar el timbre metálico agudo.
      */
-    fun speak(text: String) {
-        if (!isTtsInitialized || textToSpeech == null) {
-            pendingSpeechText = text
-            return
+    private fun configureHighQualitySpanishVoice(tts: TextToSpeech) {
+        val preferredTags = listOf("es-CO", "es-MX", "es-US", "es-ES")
+
+        // 1. Configurar idioma base en español (priorizando es-CO, es-MX, es-US, es-ES)
+        var languageConfigured = false
+        for (tag in preferredTags) {
+            val res = tts.setLanguage(Locale.forLanguageTag(tag))
+            if (res != TextToSpeech.LANG_MISSING_DATA && res != TextToSpeech.LANG_NOT_SUPPORTED) {
+                languageConfigured = true
+                break
+            }
+        }
+        if (!languageConfigured) {
+            tts.setLanguage(Locale.forLanguageTag("es"))
         }
 
-        val utteranceId = "chatbot_speech_${System.currentTimeMillis()}"
-        textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        // 2. Buscar voz de alta calidad (quality >= Voice.QUALITY_HIGH) con preferencia "network" / "wavenet"
+        try {
+            val availableVoices = tts.voices?.filterNotNull().orEmpty()
+            val spanishHighQualityVoices = availableVoices.filter { voice ->
+                val lang = voice.locale?.language?.lowercase(Locale.ROOT) ?: ""
+                val country = voice.locale?.country?.uppercase(Locale.ROOT) ?: ""
+                val localeTag = if (country.isNotEmpty()) "$lang-$country" else lang
+                val isTargetSpanish = lang == "es" &&
+                        (preferredTags.any { it.equals(localeTag, ignoreCase = true) } || country.isEmpty())
+                isTargetSpanish && voice.quality >= Voice.QUALITY_HIGH
+            }
+
+            val selectedVoice = spanishHighQualityVoices.maxWithOrNull(
+                compareBy<Voice> { voice ->
+                    val lowerName = voice.name.lowercase(Locale.ROOT)
+                    lowerName.contains("wavenet") || lowerName.contains("network")
+                }.thenBy { voice ->
+                    val tag = "${voice.locale.language}-${voice.locale.country}"
+                    val idx = preferredTags.indexOfFirst { it.equals(tag, ignoreCase = true) }
+                    if (idx >= 0) (preferredTags.size - idx) else 0
+                }.thenBy { voice ->
+                    voice.quality
+                }
+            )
+
+            if (selectedVoice != null) {
+                tts.voice = selectedVoice
+                Log.d(
+                    "AudioEngine",
+                    "TTS Voz de alta calidad seleccionada: ${selectedVoice.name} " +
+                            "(locale=${selectedVoice.locale}, quality=${selectedVoice.quality})"
+                )
+            } else {
+                Log.d("AudioEngine", "No se halló voz con QUALITY_HIGH; usando voz española predeterminada con pitch=0.95f y rate=0.85f.")
+            }
+        } catch (e: Exception) {
+            Log.w("AudioEngine", "No se pudo inspeccionar tts.voices; usando configuración base en español", e)
+        }
+
+        tts.setPitch(DEFAULT_WARM_PITCH)
+        tts.setSpeechRate(0.85f)
     }
 
     /**
-     * Pausa o detiene la reproducción del TTS.
+     * Reproduce un texto en voz alta en español respetando la velocidad configurada
+     * y el estado de silenciamiento (Mute). Guarda siempre lastSpokenText.
+     */
+    fun speak(text: String) {
+        val cleanText = text.trim()
+        if (cleanText.isNotEmpty()) {
+            lastSpokenText = cleanText
+        }
+
+        if (isVoiceMuted) {
+            Log.d("AudioEngine", "TTS silenciado por el usuario. No se emite audio.")
+            stopSpeaking()
+            return
+        }
+
+        if (!isTtsInitialized || textToSpeech == null) {
+            pendingSpeechText = cleanText
+            return
+        }
+
+        textToSpeech?.setPitch(DEFAULT_WARM_PITCH)
+        textToSpeech?.setSpeechRate(currentSpeechRate)
+        val utteranceId = "chatbot_speech_${System.currentTimeMillis()}"
+        activeUtteranceId = utteranceId
+        textToSpeech?.speak(lastSpokenText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+    }
+
+    /**
+     * Vuelve a reproducir desde el principio el último spoken_text del bot
+     * (tts.speak(lastSpokenText, TextToSpeech.QUEUE_FLUSH, ...)).
+     */
+    fun repeatLastSpoken(fallbackText: String = "") {
+        if (fallbackText.isNotBlank()) {
+            lastSpokenText = fallbackText.trim()
+        }
+        if (lastSpokenText.isBlank()) return
+
+        if (isVoiceMuted) {
+            isVoiceMuted = false
+        }
+
+        if (!isTtsInitialized || textToSpeech == null) {
+            pendingSpeechText = lastSpokenText
+            return
+        }
+
+        textToSpeech?.setPitch(DEFAULT_WARM_PITCH)
+        textToSpeech?.setSpeechRate(currentSpeechRate)
+        val utteranceId = "chatbot_repeat_${System.currentTimeMillis()}"
+        activeUtteranceId = utteranceId
+        textToSpeech?.speak(lastSpokenText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+    }
+
+    /**
+     * Alterna o actualiza la velocidad de voz entre 0.80f (Pausado) y 1.0f (Normal)
+     * y reinicia la lectura actual con la nueva velocidad.
+     */
+    fun setSpeechRateAndRestart(rate: Float, fallbackText: String = "") {
+        currentSpeechRate = rate
+        if (fallbackText.isNotBlank()) {
+            lastSpokenText = fallbackText.trim()
+        }
+
+        if (!isTtsInitialized || textToSpeech == null) {
+            return
+        }
+
+        textToSpeech?.setSpeechRate(currentSpeechRate)
+        if (!isVoiceMuted && lastSpokenText.isNotBlank()) {
+            val utteranceId = "chatbot_speed_${System.currentTimeMillis()}"
+            activeUtteranceId = utteranceId
+            textToSpeech?.speak(lastSpokenText, TextToSpeech.QUEUE_FLUSH, null, utteranceId)
+        }
+    }
+
+    /**
+     * Silencia o reactiva la salida de voz del TTS.
+     */
+    fun setMuted(muted: Boolean, resumeText: String = "") {
+        isVoiceMuted = muted
+        if (resumeText.isNotBlank()) {
+            lastSpokenText = resumeText.trim()
+        }
+
+        if (muted) {
+            stopSpeaking()
+        } else if (lastSpokenText.isNotBlank()) {
+            speak(lastSpokenText)
+        }
+    }
+
+    fun getLastSpokenText(): String = lastSpokenText
+
+    /**
+     * Pausa o detiene inmediatamente la reproducción del TTS (tts.stop()).
      */
     fun stopSpeaking() {
+        pendingSpeechText = null
+        activeUtteranceId = null
         try {
             textToSpeech?.stop()
         } catch (e: Exception) {
@@ -255,13 +433,19 @@ class AudioEngine(
         }
     }
 
+    /**
+     * Detiene inmediatamente tanto el TTS (tts.stop()) como el STT (speechRecognizer.cancel()).
+     * Utilizado al pulsar "Inicio" / "Terminar".
+     */
+    fun stopAllAndCancel() {
+        stopSpeaking()
+        cancelListening()
+    }
+
     // =========================================================================
     // 4. LIBERACIÓN DE RECURSOS (Anti-Memory Leaks)
     // =========================================================================
 
-    /**
-     * Libera de forma segura todos los recursos hardware y servicios asociados.
-     */
     fun destroy() {
         mainHandler.post {
             try {
@@ -274,6 +458,7 @@ class AudioEngine(
             }
 
             try {
+                activeUtteranceId = null
                 textToSpeech?.stop()
                 textToSpeech?.shutdown()
                 textToSpeech = null

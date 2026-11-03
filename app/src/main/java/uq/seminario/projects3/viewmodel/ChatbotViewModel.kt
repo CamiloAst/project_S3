@@ -1,16 +1,23 @@
 package uq.seminario.projects3.viewmodel
 
 import android.app.Application
-import android.speech.SpeechRecognizer
+import android.media.MediaPlayer
+import android.util.Base64
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import uq.seminario.projects3.audio.AudioEngine
 import uq.seminario.projects3.network.ChatApiClient
+import uq.seminario.projects3.network.ChatData
+import uq.seminario.projects3.safety.EmergencyDetector
+import uq.seminario.projects3.session.SessionIdProvider
+import java.io.File
+import java.io.FileOutputStream
 
 /**
  * Modelo de datos para las opciones de la pantalla de decisión.
@@ -21,17 +28,22 @@ data class DecisionOption(
 )
 
 /**
- * Estados de UI requeridos para el chatbot de acompañamiento gerontológico.
+ * Estados de UI requeridos para el chatbot de acompañamiento gerontológico (Modelo CARE).
+ * Nota estricta de UX: No existe estado intermedio de "Pensando..." o "Procesando...".
  */
 sealed interface UiState {
     data object Idle : UiState
     data object Listening : UiState
     data class Speaking(
-        val text: String = "Claro. Tu cita médica está programada para mañana a las diez y media de la mañana en el centro de salud San José.",
+        val screenText: String = "Cita médica: mañana 10:30 AM",
+        val spokenText: String = "Claro. Tu cita médica está programada para mañana a las diez y media de la mañana en el centro de salud San José.",
+        val userEmotion: String = "NEUTRA",
         val isPaused: Boolean = false
     ) : UiState
     data class AwaitingDecision(
         val question: String = "¿Quieres continuar con la conversación?",
+        val spokenText: String = "Aquí estoy atento para acompañarte en lo que necesites. ¿Quieres continuar con nuestra charla en este momento?",
+        val userEmotion: String = "NEUTRA",
         val confirmOption: DecisionOption = DecisionOption(
             title = "Sí",
             subtitle = "Seguir hablando con tu asistente"
@@ -42,24 +54,77 @@ sealed interface UiState {
         )
     ) : UiState
     data class Repair(
-        val message: String = "No he entendido tu pregunta. ¿Puedes repetirla?"
+        val message: String = DEFAULT_REPAIR_MESSAGE
     ) : UiState
+    /**
+     * Alerta de posible emergencia (`suggested_action = "emergency_alert"`).
+     * Ambiente de pruebas: solo informa al usuario; no llama ni avisa a nadie.
+     */
+    data class Emergency(
+        val screenText: String = EMERGENCY_SCREEN_TEXT,
+        val spokenText: String = EMERGENCY_SPOKEN_TEXT
+    ) : UiState
+
+    companion object {
+        const val DEFAULT_REPAIR_MESSAGE = "No he entendido tu pregunta. ¿Puedes repetirla?"
+
+        // Mismo mensaje que EMERGENCY_SPOKEN_TEXT / EMERGENCY_SCREEN_TEXT del backend
+        const val EMERGENCY_SPOKEN_TEXT = "Te estoy escuchando, mantén la calma y no hagas esfuerzos. Lo que me cuentas puede ser urgente. Por favor, pide ayuda ahora mismo a una persona cercana o a tu cuidador."
+        const val EMERGENCY_SCREEN_TEXT = "Pide ayuda a alguien cercano"
+    }
 }
 
 /**
- * StateHolder que orquesta la lógica de negocio, los estados de UI y el motor de audio bidireccional.
- * Hereda de AndroidViewModel para acceder de forma segura al contexto de la aplicación sin fugas de memoria.
+ * StateHolder que orquesta la lógica de negocio, la pila de navegación (`ArrayDeque<UiState>`),
+ * la sincronización multimodal del Modelo CARE (Reloj Maestro) y los controles de lectura/audio.
  */
 class ChatbotViewModel(application: Application) : AndroidViewModel(application) {
 
+    companion object {
+        private const val TAG = "ChatbotViewModel"
+    }
+
+    // Identificador único por instalación (evita mezclar historiales entre dispositivos)
+    private val sessionId: String = SessionIdProvider.get(application)
+
+    // Historial de navegación de pantallas (Backstack de estados UI)
+    private val stateHistory = ArrayDeque<UiState>()
+
     private val _uiState = MutableStateFlow<UiState>(UiState.Idle)
     val uiState: StateFlow<UiState> = _uiState.asStateFlow()
+
+    // --- Estados de Controles de Audio y Lectura ---
+    private val _isPaused = MutableStateFlow(false)
+    val isPaused: StateFlow<Boolean> = _isPaused.asStateFlow()
+
+    private val _isSlowSpeech = MutableStateFlow(true)
+    val isSlowSpeech: StateFlow<Boolean> = _isSlowSpeech.asStateFlow()
+
+    private val _isVoiceMuted = MutableStateFlow(false)
+    val isVoiceMuted: StateFlow<Boolean> = _isVoiceMuted.asStateFlow()
+
+    private val _lastSpokenText = MutableStateFlow(
+        "Claro. Tu cita médica está programada para mañana a las diez y media de la mañana en el centro de salud San José."
+    )
+    val lastSpokenText: StateFlow<String> = _lastSpokenText.asStateFlow()
 
     // Estado del diálogo accesible de permisos
     private val _showPermissionDialog = MutableStateFlow(false)
     val showPermissionDialog: StateFlow<Boolean> = _showPermissionDialog.asStateFlow()
 
-    // Motor de audio bidireccional (STT + TTS a 0.85f + Haptic)
+    // Referencia a la petición HTTP en curso para cancelarla si el usuario interrumpe
+    private var activeChatJob: Job? = null
+
+    private var localFallbackCounter = 0
+
+    // --- Reproductor de Voz Neural (MediaPlayer) y Reloj Maestro de Sincronía ---
+    private var mediaPlayer: MediaPlayer? = null
+    private var isNeuralAudioActive: Boolean = false
+    private var currentTempAudioFile: File? = null
+    private val _lastAudioDurationMs = MutableStateFlow(0L)
+    val lastAudioDurationMs: StateFlow<Long> = _lastAudioDurationMs.asStateFlow()
+
+    // Motor de audio bidireccional (STT + TTS Nativo de respaldo + Haptic)
     private val audioEngine = AudioEngine(
         context = application,
         onSpeechRecognized = { transcribedText ->
@@ -73,47 +138,211 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         }
     )
 
+    /**
+     * Detiene inmediatamente tanto el MediaPlayer neural como el TextToSpeech local
+     * antes de cualquier cambio de estado o interrupción del usuario.
+     */
+    private fun stopMediaPlayerAndTts() {
+        try {
+            mediaPlayer?.let { player ->
+                if (player.isPlaying) {
+                    player.stop()
+                }
+                player.reset()
+                player.release()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error al detener/liberar MediaPlayer", e)
+        } finally {
+            mediaPlayer = null
+            isNeuralAudioActive = false
+        }
+        audioEngine.stopSpeaking()
+    }
+
+    /**
+     * Decodifica el audio neural en Base64 a un archivo temporal .mp3 en context.cacheDir
+     * y lo reproduce inmediatamente con MediaPlayer. Si falla, recurre al TTS nativo mejorado.
+     */
+    private fun playNeuralAudioOrFallback(audioBase64: String?, spokenText: String) {
+        stopMediaPlayerAndTts()
+
+        if (audioBase64.isNullOrBlank()) {
+            isNeuralAudioActive = false
+            audioEngine.speak(spokenText)
+            return
+        }
+
+        try {
+            val context = getApplication<Application>()
+            val cleanBase64 = audioBase64.substringAfter("base64,", audioBase64).trim()
+            val audioBytes = Base64.decode(cleanBase64, Base64.DEFAULT)
+            if (audioBytes.isEmpty()) {
+                throw IllegalArgumentException("El buffer decodificado desde Base64 está vacío.")
+            }
+
+            currentTempAudioFile?.delete()
+            val tempMp3 = File.createTempFile("neural_voice_", ".mp3", context.cacheDir)
+            FileOutputStream(tempMp3).use { fos ->
+                fos.write(audioBytes)
+                fos.flush()
+            }
+            currentTempAudioFile = tempMp3
+
+            val player = MediaPlayer().apply {
+                setDataSource(tempMp3.absolutePath)
+                setOnCompletionListener {
+                    handleTtsPlaybackFinished()
+                }
+                setOnErrorListener { _, what, extra ->
+                    Log.w(TAG, "Error en MediaPlayer neural (what=$what, extra=$extra). Activando TTS local.")
+                    isNeuralAudioActive = false
+                    audioEngine.speak(spokenText)
+                    true
+                }
+                prepare()
+            }
+
+            mediaPlayer = player
+            isNeuralAudioActive = true
+
+            if (player.duration > 0) {
+                _lastAudioDurationMs.value = player.duration.toLong()
+            }
+
+            if (!_isVoiceMuted.value) {
+                player.start()
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Fallo al reproducir voz neural MP3 (${e.message}). Usando TTS local de respaldo.")
+            isNeuralAudioActive = false
+            mediaPlayer = null
+            audioEngine.speak(spokenText)
+        }
+    }
+
     // =========================================================================
-    // ACCIONES DE ENTRADA POR VOZ (STT) Y HÁPTICA
+    // 1. PILA DE NAVEGACIÓN (HISTORIAL ArrayDeque<UiState>, ATRÁS E INICIO)
     // =========================================================================
 
     /**
-     * Invocado al presionar el botón principal del micrófono en VoiceInputScreen.
-     * @param hasPermission Indica si el permiso de RECORD_AUDIO ya está concedido.
-     * @param onRequestPermission Callback para invocar el launcher de Compose si falta el permiso.
+     * Cambia hacia un nuevo `UiState` registrando la pantalla anterior en `stateHistory`.
      */
+    private fun transitionToState(newState: UiState) {
+        val current = _uiState.value
+        if (newState is UiState.Idle) {
+            stateHistory.clear()
+            _uiState.value = UiState.Idle
+            return
+        }
+
+        if (current != newState) {
+            // Se guarda el estado anterior en la pila (evitando apilar el estado transitorio Listening
+            // cuando el micrófono pasa automáticamente a la respuesta del bot).
+            if (current !is UiState.Listening) {
+                val stateToPush = if (current is UiState.Speaking) {
+                    current.copy(isPaused = true)
+                } else {
+                    current
+                }
+                if (stateHistory.lastOrNull() != stateToPush) {
+                    stateHistory.addLast(stateToPush)
+                }
+            }
+            _uiState.value = newState
+        }
+    }
+
+    /**
+     * Navega hacia la pantalla anterior del historial (`stateHistory`):
+     * - Detiene inmediatamente el MediaPlayer, el TTS (`tts.stop()`) y el micrófono (`speechRecognizer.cancel()`).
+     * - Restaura el estado anterior de la pila o regresa a `Idle` si está vacía.
+     */
+    fun navigateBack() {
+        activeChatJob?.cancel()
+        audioEngine.triggerHapticFeedback()
+        stopMediaPlayerAndTts()
+        audioEngine.stopAllAndCancel()
+        _isPaused.value = true
+
+        val previousState = if (stateHistory.isNotEmpty()) {
+            stateHistory.removeLast()
+        } else {
+            UiState.Idle
+        }
+
+        when (previousState) {
+            is UiState.Speaking -> {
+                _lastSpokenText.value = previousState.spokenText
+                _uiState.value = previousState.copy(isPaused = true)
+            }
+            is UiState.AwaitingDecision -> {
+                if (previousState.spokenText.isNotBlank()) {
+                    _lastSpokenText.value = previousState.spokenText
+                }
+                _uiState.value = previousState
+            }
+            is UiState.Repair -> {
+                _lastSpokenText.value = previousState.message
+                _uiState.value = previousState
+            }
+            is UiState.Emergency -> {
+                _lastSpokenText.value = previousState.spokenText
+                _uiState.value = previousState
+            }
+            else -> {
+                _uiState.value = UiState.Idle
+            }
+        }
+    }
+
+    /**
+     * Limpia el historial de navegación, detiene inmediatamente MediaPlayer, TTS y STT
+     * y regresa directamente al estado inicial `Idle` (pantalla principal del botón "Hablar").
+     */
+    fun navigateHome() {
+        activeChatJob?.cancel()
+        audioEngine.triggerHapticFeedback()
+        stateHistory.clear()
+        stopMediaPlayerAndTts()
+        audioEngine.stopAllAndCancel()
+        _isPaused.value = true
+        _uiState.value = UiState.Idle
+    }
+
+    // =========================================================================
+    // 2. ACCIONES DE ENTRADA POR VOZ (STT), HÁPTICA Y GANCHOS DE INTERRUPCIÓN
+    // =========================================================================
+
     fun onMicClicked(
         hasPermission: Boolean,
         onRequestPermission: () -> Unit
     ) {
+        activeChatJob?.cancel()
+        stopMediaPlayerAndTts()
+
         if (!hasPermission) {
             _showPermissionDialog.value = true
             return
         }
 
         when (_uiState.value) {
-            is UiState.Idle, is UiState.Repair, is UiState.AwaitingDecision -> {
+            is UiState.Idle, is UiState.Repair, is UiState.AwaitingDecision, is UiState.Speaking,
+            is UiState.Emergency -> {
                 startListeningWithHaptics()
             }
             is UiState.Listening -> {
-                // Detener escucha manualmente si el usuario lo desea
                 audioEngine.stopListening()
                 audioEngine.triggerHapticFeedback()
-            }
-            is UiState.Speaking -> {
-                // Si el bot estaba hablando y se presiona hablar, se interrumpe y se escucha
-                audioEngine.stopSpeaking()
-                startListeningWithHaptics()
             }
         }
     }
 
-    /**
-     * Inicia la escucha con confirmación táctil háptica.
-     */
     fun startListeningWithHaptics() {
+        stopMediaPlayerAndTts()
         audioEngine.triggerHapticFeedback()
-        _uiState.value = UiState.Listening
+        _isPaused.value = true
+        transitionToState(UiState.Listening)
         audioEngine.startListening()
     }
 
@@ -127,176 +356,481 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // =========================================================================
-    // RESPUESTAS Y SÍNTESIS DE VOZ (TTS)
+    // 3. ORQUESTACIÓN STT -> BACKEND -> DISPARO SÍNCRONO (RELOJ MAESTRO FASE 1)
     // =========================================================================
 
     private fun handleSpeechRecognitionResult(transcribedText: String) {
-        viewModelScope.launch {
-            val result = ChatApiClient.sendChatMessage(transcribedText)
-            result.onSuccess { careData ->
-                Log.d("ChatbotViewModel", "Respuesta CARE recibida: [${careData.suggestedAction}] emoción=${careData.userEmotion}")
-                
-                val textToSpeak = careData.spokenText.ifBlank {
-                    generateBotResponse(transcribedText)
-                }
+        activeChatJob?.cancel()
+        activeChatJob = viewModelScope.launch {
+            val result = ChatApiClient.sendChatMessage(
+                message = transcribedText,
+                sessionId = sessionId
+            )
 
-                _uiState.value = UiState.Speaking(
-                    text = textToSpeak,
-                    isPaused = false
+            result.onSuccess { response ->
+                val data = response.data
+                Log.d(
+                    TAG,
+                    "Respuesta CARE recibida [sessionId=${response.sessionId}]: " +
+                            "action=${data.suggested_action}, emotion=${data.user_emotion}, screen='${data.screen_text}'"
                 )
-                // Síntesis de voz automática de la respuesta generada por Gemini a 0.85f
-                audioEngine.speak(textToSpeak)
+                executeMasterClockSync(data)
             }.onFailure { error ->
-                Log.w("ChatbotViewModel", "Backend offline o inaccesible (${error.message}). Usando respuesta local de respaldo.")
-                val fallbackAnswer = generateBotResponse(transcribedText)
-                _uiState.value = UiState.Speaking(
-                    text = fallbackAnswer,
-                    isPaused = false
-                )
-                audioEngine.speak(fallbackAnswer)
+                Log.w(TAG, "Error o latencia al conectar con el backend (${error.message}). Aplicando respaldo CARE local.")
+                val fallbackData = generateLocalFallbackChatData(transcribedText)
+                executeMasterClockSync(fallbackData)
             }
         }
     }
 
-    /**
-     * Manejo de errores silencioso:
-     * Si no se detecta voz o hay ruido, no se muestran pop-ups genéricos del sistema.
-     * Se transiciona a la pantalla de la lupa (UiState.Repair).
-     */
-    private fun handleSpeechRecognitionError(errorCode: Int) {
-        Log.d("ChatbotViewModel", "Manejo de error de voz silencioso: $errorCode")
-        val message = when (errorCode) {
-            SpeechRecognizer.ERROR_NO_MATCH, SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> {
-                "No he entendido tu pregunta. ¿Puedes repetirla?"
-            }
-            SpeechRecognizer.ERROR_AUDIO -> {
-                "Hubo un problema con el audio. ¿Puedes intentar de nuevo?"
-            }
-            else -> {
-                "No te he escuchado claramente. ¿Puedes repetírmelo?"
+    private fun executeMasterClockSync(data: ChatData) {
+        val action = data.suggested_action.trim().lowercase()
+        val emotion = data.user_emotion.trim().ifBlank { "NEUTRA" }
+        val normEmotion = emotion.uppercase()
+
+        data.audio_duration_ms?.let { duration ->
+            if (duration > 0) {
+                _lastAudioDurationMs.value = duration
             }
         }
 
-        _uiState.value = UiState.Repair(message = message)
-        // El asistente lee con voz comprensiva el mensaje de reparación
-        audioEngine.speak(message)
+        if (action == "emergency_alert") {
+            // Redundancia (CARE): la alerta se lee en voz alta y se muestra en pantalla a la vez.
+            // Ambiente de pruebas: no se realiza ninguna llamada ni aviso automático.
+            val emergencySpoken = data.spoken_text.ifBlank { UiState.EMERGENCY_SPOKEN_TEXT }
+            val emergencyScreen = data.screen_text.ifBlank { UiState.EMERGENCY_SCREEN_TEXT }
+            _lastSpokenText.value = emergencySpoken
+            _isPaused.value = _isVoiceMuted.value
+            audioEngine.triggerHapticFeedback()
+            playNeuralAudioOrFallback(data.audio_base64, emergencySpoken)
+            transitionToState(
+                UiState.Emergency(screenText = emergencyScreen, spokenText = emergencySpoken)
+            )
+            return
+        }
+
+        if (action == "retry") {
+            val repairMessage = UiState.DEFAULT_REPAIR_MESSAGE
+            val spokenHelp = data.spoken_text.ifBlank { repairMessage }
+            _lastSpokenText.value = spokenHelp
+            _isPaused.value = _isVoiceMuted.value
+            playNeuralAudioOrFallback(data.audio_base64, spokenHelp)
+            transitionToState(UiState.Repair(message = repairMessage))
+            return
+        }
+
+        val spokenText = data.spoken_text.ifBlank {
+            "Estoy aquí contigo para escucharte y acompañarte."
+        }
+        _lastSpokenText.value = spokenText
+
+        val isSadOrLonely = normEmotion.contains("TRISTEZA") || normEmotion.contains("SOLEDAD")
+        val defaultScreenText = if (isSadOrLonely) {
+            "Un lugar sereno para respirar"
+        } else {
+            "Estamos aquí contigo para acompañarte"
+        }
+        val screenText = data.screen_text.ifBlank { defaultScreenText }
+
+        val pausedState = _isVoiceMuted.value
+        _isPaused.value = pausedState
+
+        // A) Iniciar inmediatamente voz neural con MediaPlayer (si audio_base64 != null) o TTS de respaldo
+        playNeuralAudioOrFallback(data.audio_base64, spokenText)
+
+        // B) Actualizar el estado de Compose con data.screen_text según suggested_action
+        when (action) {
+            "show_decision_buttons" -> {
+                transitionToState(
+                    UiState.AwaitingDecision(
+                        question = screenText.ifBlank { "¿Quieres continuar con la conversación?" },
+                        spokenText = spokenText,
+                        userEmotion = emotion
+                    )
+                )
+            }
+            else -> {
+                transitionToState(
+                    UiState.Speaking(
+                        screenText = screenText,
+                        spokenText = spokenText,
+                        userEmotion = emotion,
+                        isPaused = pausedState
+                    )
+                )
+            }
+        }
+    }
+
+    private fun handleSpeechRecognitionError(errorCode: Int) {
+        Log.d(TAG, "Fallo en STT (código $errorCode). Navegando a pantalla de reparación.")
+        stopMediaPlayerAndTts()
+        val repairMessage = UiState.DEFAULT_REPAIR_MESSAGE
+        _lastSpokenText.value = repairMessage
+        _isPaused.value = _isVoiceMuted.value
+        transitionToState(UiState.Repair(message = repairMessage))
+        audioEngine.speak(repairMessage)
     }
 
     private fun handleTtsPlaybackFinished() {
-        // La lectura ha terminado con éxito
-        Log.d("ChatbotViewModel", "Lectura del bot completada")
+        Log.d(TAG, "Lectura de voz completada")
+        _isPaused.value = true
+        val current = _uiState.value
+        if (current is UiState.Speaking && !current.isPaused) {
+            _uiState.value = current.copy(isPaused = true)
+        }
     }
 
-    /**
-     * Pausa o reanuda la lectura de la respuesta del bot.
-     */
+    // =========================================================================
+    // 4. CONTROLES DE LECTURA Y AUDIO (MediaPlayer Neural + TTS Fallback)
+    // =========================================================================
+
+    private fun resolveCurrentSpokenText(): String {
+        return when (val state = _uiState.value) {
+            is UiState.Speaking -> state.spokenText.ifBlank { _lastSpokenText.value }
+            is UiState.AwaitingDecision -> state.spokenText.ifBlank { _lastSpokenText.value }
+            is UiState.Repair -> state.message.ifBlank { _lastSpokenText.value }
+            is UiState.Emergency -> state.spokenText.ifBlank { _lastSpokenText.value }
+            else -> _lastSpokenText.value
+        }
+    }
+
     fun toggleSpeakingPause() {
-        val current = _uiState.value
-        if (current is UiState.Speaking) {
-            if (current.isPaused) {
-                // Reanuda la lectura
-                audioEngine.speak(current.text)
+        audioEngine.triggerHapticFeedback()
+        val currentlyPaused = _isPaused.value
+        val textToSpeak = resolveCurrentSpokenText()
+
+        if (currentlyPaused) {
+            // Continuar lectura: mediaPlayer.start() desde donde quedó (o TTS de respaldo)
+            if (_isVoiceMuted.value) {
+                _isVoiceMuted.value = false
+                audioEngine.setMuted(false)
+            }
+            _isPaused.value = false
+            val current = _uiState.value
+            if (current is UiState.Speaking) {
                 _uiState.value = current.copy(isPaused = false)
+            }
+
+            val player = mediaPlayer
+            if (isNeuralAudioActive && player != null) {
+                try {
+                    player.start()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error al reanudar MediaPlayer; usando TTS de respaldo", e)
+                    isNeuralAudioActive = false
+                    audioEngine.speak(textToSpeak)
+                }
             } else {
-                // Pausa la lectura
-                audioEngine.stopSpeaking()
+                audioEngine.speak(textToSpeak)
+            }
+        } else {
+            // Pausar lectura: mediaPlayer.pause() y actualiza el estado a pausado
+            val player = mediaPlayer
+            if (isNeuralAudioActive && player != null) {
+                try {
+                    if (player.isPlaying) {
+                        player.pause()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error al pausar MediaPlayer", e)
+                }
+            }
+            audioEngine.stopSpeaking()
+            _isPaused.value = true
+            val current = _uiState.value
+            if (current is UiState.Speaking) {
                 _uiState.value = current.copy(isPaused = true)
             }
         }
     }
 
-    /**
-     * Permite probar manualmente el estado Speaking desde la barra de prueba.
-     */
-    fun stopListeningAndSpeak(response: String? = null) {
-        val textToSpeak = response ?: "Claro. Tu cita médica está programada para mañana a las diez y media de la mañana en el centro de salud San José."
-        _uiState.value = UiState.Speaking(
-            text = textToSpeak,
-            isPaused = false
-        )
-        audioEngine.speak(textToSpeak)
-    }
-
-    /**
-     * Muestra la pantalla de decisión.
-     */
-    fun askDecision(
-        question: String = "¿Quieres continuar con la conversación?",
-        confirmOption: DecisionOption = DecisionOption("Sí", "Seguir hablando con tu asistente"),
-        dismissOption: DecisionOption = DecisionOption("No", "Terminar la conversación por ahora")
-    ) {
-        audioEngine.stopSpeaking()
-        _uiState.value = UiState.AwaitingDecision(
-            question = question,
-            confirmOption = confirmOption,
-            dismissOption = dismissOption
-        )
-    }
-
-    /**
-     * Procesa la decisión tomada por el usuario.
-     */
-    fun onDecisionMade(confirmed: Boolean) {
+    fun repeatLastResponse() {
         audioEngine.triggerHapticFeedback()
-        if (confirmed) {
-            startListeningWithHaptics()
+        val textToRepeat = resolveCurrentSpokenText()
+        _lastSpokenText.value = textToRepeat
+
+        if (_isVoiceMuted.value) {
+            _isVoiceMuted.value = false
+            audioEngine.setMuted(false)
+        }
+
+        _isPaused.value = false
+        val current = _uiState.value
+        if (current is UiState.Speaking) {
+            _uiState.value = current.copy(isPaused = false)
+        }
+
+        val player = mediaPlayer
+        if (isNeuralAudioActive && player != null) {
+            try {
+                player.seekTo(0)
+                player.start()
+                return
+            } catch (e: Exception) {
+                Log.w(TAG, "Error al repetir MediaPlayer; usando TTS de respaldo", e)
+                isNeuralAudioActive = false
+            }
+        }
+
+        audioEngine.repeatLastSpoken(textToRepeat)
+    }
+
+    fun toggleSpeechSpeed() {
+        audioEngine.triggerHapticFeedback()
+        val newSlowState = !_isSlowSpeech.value
+        _isSlowSpeech.value = newSlowState
+
+        val targetRate = if (newSlowState) {
+            AudioEngine.SPEECH_RATE_SLOW
         } else {
-            resetToIdle()
+            AudioEngine.SPEECH_RATE_NORMAL
+        }
+
+        val textToSpeak = resolveCurrentSpokenText()
+        if (!_isVoiceMuted.value) {
+            _isPaused.value = false
+            val current = _uiState.value
+            if (current is UiState.Speaking) {
+                _uiState.value = current.copy(isPaused = false)
+            }
+        }
+
+        val player = mediaPlayer
+        if (isNeuralAudioActive && player != null) {
+            try {
+                player.seekTo(0)
+                if (!_isVoiceMuted.value) {
+                    player.start()
+                }
+                return
+            } catch (e: Exception) {
+                isNeuralAudioActive = false
+            }
+        }
+
+        audioEngine.setSpeechRateAndRestart(targetRate, textToSpeak)
+    }
+
+    fun toggleVoiceMute() {
+        audioEngine.triggerHapticFeedback()
+        val newMutedState = !_isVoiceMuted.value
+        _isVoiceMuted.value = newMutedState
+
+        val textToSpeak = resolveCurrentSpokenText()
+        if (newMutedState) {
+            val player = mediaPlayer
+            if (isNeuralAudioActive && player != null) {
+                try {
+                    if (player.isPlaying) {
+                        player.pause()
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error al silenciar MediaPlayer", e)
+                }
+            }
+            audioEngine.setMuted(true, textToSpeak)
+            _isPaused.value = true
+            val current = _uiState.value
+            if (current is UiState.Speaking) {
+                _uiState.value = current.copy(isPaused = true)
+            }
+        } else {
+            _isPaused.value = false
+            val current = _uiState.value
+            if (current is UiState.Speaking) {
+                _uiState.value = current.copy(isPaused = false)
+            }
+            val player = mediaPlayer
+            if (isNeuralAudioActive && player != null) {
+                try {
+                    player.start()
+                    return
+                } catch (e: Exception) {
+                    isNeuralAudioActive = false
+                }
+            }
+            audioEngine.setMuted(false, textToSpeak)
         }
     }
 
-    /**
-     * Restablece al estado Idle.
-     */
-    fun resetToIdle() {
-        audioEngine.stopSpeaking()
-        audioEngine.stopListening()
-        _uiState.value = UiState.Idle
+    fun returnToHome() {
+        navigateHome()
     }
 
-    /**
-     * Muestra manualmente el estado de reparación para pruebas.
-     */
-    fun showRepairState(message: String = "No he entendido tu pregunta. ¿Puedes repetirla?") {
-        _uiState.value = UiState.Repair(message = message)
+    fun onDecisionMade(confirmed: Boolean) {
+        activeChatJob?.cancel()
+        stopMediaPlayerAndTts()
+
+        if (confirmed) {
+            startListeningWithHaptics()
+        } else {
+            navigateHome()
+        }
+    }
+
+    fun resetToIdle() {
+        navigateHome()
+    }
+
+    // =========================================================================
+    // 5. MÉTODOS AUXILIARES PARA BARRA DE DEMOSTRACIÓN
+    // =========================================================================
+
+    fun stopListeningAndSpeak(
+        screenText: String = "Cita médica programada para mañana",
+        spokenText: String = "Claro. Tu cita médica está programada para mañana a las diez y media de la mañana en el centro de salud San José.",
+        userEmotion: String = "NEUTRA"
+    ) {
+        activeChatJob?.cancel()
+        stopMediaPlayerAndTts()
+        audioEngine.cancelListening()
+        _lastSpokenText.value = spokenText
+        val pausedState = _isVoiceMuted.value
+        _isPaused.value = pausedState
+        audioEngine.speak(spokenText)
+        transitionToState(
+            UiState.Speaking(
+                screenText = screenText,
+                spokenText = spokenText,
+                userEmotion = userEmotion,
+                isPaused = pausedState
+            )
+        )
+    }
+
+    fun askDecision(
+        question: String = "¿Quieres continuar con la conversación?",
+        spokenText: String = "Aquí estoy atento para acompañarte en lo que necesites. ¿Quieres continuar con nuestra charla en este momento?",
+        confirmOption: DecisionOption = DecisionOption("Sí", "Seguir hablando con tu asistente"),
+        dismissOption: DecisionOption = DecisionOption("No", "Terminar la conversación por ahora")
+    ) {
+        activeChatJob?.cancel()
+        stopMediaPlayerAndTts()
+        audioEngine.cancelListening()
+        _lastSpokenText.value = spokenText
+        _isPaused.value = _isVoiceMuted.value
+        audioEngine.speak(spokenText)
+        transitionToState(
+            UiState.AwaitingDecision(
+                question = question,
+                spokenText = spokenText,
+                confirmOption = confirmOption,
+                dismissOption = dismissOption
+            )
+        )
+    }
+
+    fun showEmergencyState() {
+        activeChatJob?.cancel()
+        stopMediaPlayerAndTts()
+        audioEngine.cancelListening()
+        _lastSpokenText.value = UiState.EMERGENCY_SPOKEN_TEXT
+        _isPaused.value = _isVoiceMuted.value
+        transitionToState(UiState.Emergency())
+        audioEngine.speak(UiState.EMERGENCY_SPOKEN_TEXT)
+    }
+
+    fun showRepairState(message: String = UiState.DEFAULT_REPAIR_MESSAGE) {
+        activeChatJob?.cancel()
+        stopMediaPlayerAndTts()
+        audioEngine.cancelListening()
+        _lastSpokenText.value = message
+        _isPaused.value = _isVoiceMuted.value
+        transitionToState(UiState.Repair(message = message))
         audioEngine.speak(message)
     }
 
     // =========================================================================
-    // RESPUESTAS EMPÁTICAS Y CONTEXTUALES PARA ADULTOS MAYORES
+    // 6. RESPALDO LOCAL DE CONTINGENCIA CON ESQUEMA MULTIMODAL C.A.R.E.
     // =========================================================================
 
-    private fun generateBotResponse(userInput: String): String {
+    private fun generateLocalFallbackChatData(userInput: String): ChatData {
         val lower = userInput.lowercase()
+        localFallbackCounter++
+
         return when {
-            lower.contains("cita") || lower.contains("médic") || lower.contains("doctor") -> {
-                "Claro. Tu cita médica está programada para mañana a las diez y media de la mañana en el centro de salud San José."
+            // Prioridad máxima: posibles emergencias también deben detectarse sin conexión
+            EmergencyDetector.isCriticalRisk(userInput) -> {
+                ChatData(
+                    spoken_text = UiState.EMERGENCY_SPOKEN_TEXT,
+                    screen_text = UiState.EMERGENCY_SCREEN_TEXT,
+                    user_emotion = "NEGATIVA_ANSIEDAD_PREOCUPACION",
+                    suggested_action = "emergency_alert"
+                )
             }
-            lower.contains("hola") || lower.contains("buenos días") || lower.contains("buenas tardes") -> {
-                "¡Hola! Qué alegría saludarte hoy. Me alegra mucho escucharte. ¿Cómo te encuentras en este momento?"
+            lower.contains("preocupad") || lower.contains("ansios") || lower.contains("olvid") ||
+                    lower.contains("cita") || lower.contains("médic") || lower.contains("pastilla") ||
+                    lower.contains("medicamento") || lower.contains("remedio") -> {
+                if (localFallbackCounter % 2 == 0) {
+                    ChatData(
+                        spoken_text = "Vamos a tomar las cosas con mucha calma, paso a paso, sin ninguna prisa. Juntos podemos organizar tus citas y medicinas del día con tranquilidad. ¿Quieres que las revisemos ahora?",
+                        screen_text = "Organizando tus pendientes paso a paso",
+                        user_emotion = "NEGATIVA_ANSIEDAD_PREOCUPACION",
+                        suggested_action = "show_decision_buttons"
+                    )
+                } else {
+                    ChatData(
+                        spoken_text = "Respira profundo y suelta el aire despacio; todo está bajo control. Para tus medicinas y citas médicas siempre seguimos el orden que dejó indicado tu doctor. ¿Te gustaría verificar tu agenda?",
+                        screen_text = "Tranquilidad y orden en tu agenda",
+                        user_emotion = "NEGATIVA_ANSIEDAD_PREOCUPACION",
+                        suggested_action = "show_decision_buttons"
+                    )
+                }
             }
-            lower.contains("pastilla") || lower.contains("medicamento") || lower.contains("medicina") || lower.contains("remedio") -> {
-                "Recuerda que tu próxima pastilla para la tensión te corresponde después del almuerzo con un vaso de agua."
+            lower.contains("triste") || lower.contains("solo") || lower.contains("sola") ||
+                    lower.contains("aburr") || lower.contains("desanim") || lower.contains("nadie") -> {
+                if (localFallbackCounter % 2 == 0) {
+                    ChatData(
+                        spoken_text = "Comprendo que hoy el día se sienta silencioso para ti. Quiero que tengas la certeza de que estoy aquí a tu lado para escucharte sin prisa. ¿Te gustaría recordar algún momento bonito?",
+                        screen_text = "Un lugar sereno para respirar",
+                        user_emotion = "NEGATIVA_TRISTEZA_SOLEDAD",
+                        suggested_action = "continue"
+                    )
+                } else {
+                    ChatData(
+                        spoken_text = "Lamento mucho que estés pasando por este rato de nostalgia. Es natural extrañar la compañía, pero cuentas conmigo para charlar con calma. Respiremos juntos despacio.",
+                        screen_text = "Acompañamiento cálido en todo momento",
+                        user_emotion = "NEGATIVA_TRISTEZA_SOLEDAD",
+                        suggested_action = "continue"
+                    )
+                }
             }
-            lower.contains("triste") || lower.contains("solo") || lower.contains("sola") || lower.contains("ánimo") -> {
-                "Estoy aquí contigo para acompañarte. Siempre que quieras conversar o compartir un momento, cuentas conmigo. No estás solo."
+            lower.contains("feliz") || lower.contains("content") || lower.contains("alegr") ||
+                    lower.contains("bien") || lower.contains("niet") || lower.contains("familia") -> {
+                ChatData(
+                    spoken_text = "Qué alegría escuchar que estás pasando un momento tan agradable hoy. Disfrutar de estas cosas buenas llena el corazón de energía. ¿Qué ha sido lo que más te ha gustado de tu día?",
+                    screen_text = "Celebrando tu bienestar y alegría hoy",
+                    user_emotion = "POSITIVA",
+                    suggested_action = "continue"
+                )
             }
-            lower.contains("hora") || lower.contains("tiempo") -> {
-                "Hoy es un día agradable. Recuerda tomar un poco de sol en la mañana y mantenerte bien hidratado."
+            lower.contains("no sé") || lower.contains("no se") || lower.contains("tal vez") ||
+                    userInput.trim().split(Regex("\\s+")).size < 2 -> {
+                ChatData(
+                    spoken_text = "Disculpa, creo que tu mensaje fue muy breve y quiero asegurarme de comprenderte bien. Tómate todo el tiempo que necesites para contármelo con más detalle. ¿A qué tema te refieres?",
+                    screen_text = "Cuéntame un poco más de detalle",
+                    user_emotion = "AMBIGUA",
+                    suggested_action = "clarify"
+                )
             }
             else -> {
-                "Te he escuchado con atención cuando dijiste: \"$userInput\". Estoy aquí contigo para lo que necesites."
+                ChatData(
+                    spoken_text = "Qué gusto saludarte y compartir este momento de conversación contigo. Estoy listo para escucharte con toda calma sobre lo que quieras platicar. ¿Cómo ha estado tu jornada?",
+                    screen_text = "Listo para conversar contigo con calma",
+                    user_emotion = "NEUTRA",
+                    suggested_action = "continue"
+                )
             }
         }
     }
 
-    // =========================================================================
-    // PREVENCIÓN DE FUGAS DE MEMORIA
-    // =========================================================================
-
     override fun onCleared() {
         super.onCleared()
+        activeChatJob?.cancel()
+        stopMediaPlayerAndTts()
+        currentTempAudioFile?.delete()
         audioEngine.destroy()
-        Log.d("ChatbotViewModel", "AudioEngine destruido y memoria liberada.")
+        Log.d(TAG, "MediaPlayer y AudioEngine destruidos y memoria liberada.")
     }
 }

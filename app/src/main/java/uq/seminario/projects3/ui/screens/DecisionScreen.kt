@@ -1,5 +1,7 @@
 package uq.seminario.projects3.ui.screens
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -28,9 +30,12 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -40,24 +45,23 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import uq.seminario.projects3.ui.components.AppNavigationHeader
 import uq.seminario.projects3.ui.theme.ActionDarkBlue
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.DarkText
 import uq.seminario.projects3.ui.theme.DecisionPastelGreen
 import uq.seminario.projects3.ui.theme.DecisionPastelGreenBorder
 import uq.seminario.projects3.ui.theme.ProjectS3Theme
+import uq.seminario.projects3.ui.theme.SereneWarmBackground
 
 /**
  * Pantalla 3: Pantalla de Decisión Multimodal (DecisionScreen)
  *
- * Aplica los principios de accesibilidad gerontológica:
+ * Aplica los principios de accesibilidad gerontológica y el diseño original de los mockups:
+ * - Barra superior `AppNavigationHeader` con "← Atrás" e "🏠 Inicio".
  * - Pregunta grande, directa y visible (>=28sp).
- * - Dos botones rectangulares masivos (mínimo 64dp, configurados con 80dp para albergar título + subtítulo).
- * - Alto contraste:
- *     * "Sí": Fondo azul oscuro (#1B3B5C), texto blanco.
- *     * "No": Fondo verde pastel (#D5E7DA), texto oscuro (#1A1A1A).
- * - Principio de Equivalencia: Botón footer "Responder hablando" para usuarios que prefieren
- *   interacción por voz sobre toque de pantalla.
+ * - Dos botones rectangulares masivos con alto contraste ("Sí" y "No").
+ * - Principio de Equivalencia: Botón inferior "Responder hablando".
  */
 @Composable
 fun DecisionScreen(
@@ -69,22 +73,53 @@ fun DecisionScreen(
     onYesClick: () -> Unit,
     onNoClick: () -> Unit,
     onVoiceResponseClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    userEmotion: String = "NEUTRA",
+    onBackClick: () -> Unit = {},
+    onHomeClick: () -> Unit = {}
 ) {
+    val haptic = LocalHapticFeedback.current
+    val normEmotion = userEmotion.uppercase()
+    val isAffectiveSupport = normEmotion.contains("TRISTEZA") ||
+            normEmotion.contains("SOLEDAD") ||
+            normEmotion.contains("ANSIEDAD") ||
+            normEmotion.contains("PREOCUPACION")
+
+    val animatedBackgroundColor by animateColorAsState(
+        targetValue = if (isAffectiveSupport) SereneWarmBackground else BeigeBackground,
+        animationSpec = tween(durationMillis = 600),
+        label = "decision_affective_bg"
+    )
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = BeigeBackground
+        containerColor = animatedBackgroundColor
     ) { innerPadding ->
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 24.dp, vertical = 20.dp),
+                .padding(horizontal = 24.dp, vertical = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Sección Superior: Título con pregunta grande y directa
-            DecisionTitleSection(question = question)
+            // Sección Superior: Barra de navegación ("← Atrás" e "🏠 Inicio") + Pregunta grande
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                AppNavigationHeader(
+                    isIdle = false,
+                    showBackButton = true,
+                    showHomeButton = true,
+                    onBackClick = onBackClick,
+                    onHomeClick = onHomeClick
+                )
+
+                Spacer(modifier = Modifier.height(10.dp))
+
+                DecisionTitleSection(question = question)
+            }
 
             // Sección Central: Dos botones rectangulares masivos apilados verticalmente
             Box(
@@ -100,7 +135,6 @@ fun DecisionScreen(
                     verticalArrangement = Arrangement.spacedBy(20.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    // Botón masivo "Sí" (Azul oscuro, texto blanco)
                     MassiveDecisionButton(
                         title = yesText,
                         subtitle = yesSubtitle,
@@ -110,10 +144,12 @@ fun DecisionScreen(
                         subtitleColor = Color.White.copy(alpha = 0.9f),
                         borderColor = null,
                         accessibilityDescription = "Opción sí: $yesSubtitle",
-                        onClick = onYesClick
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onYesClick()
+                        }
                     )
 
-                    // Botón masivo "No" (Verde pastel, texto oscuro)
                     MassiveDecisionButton(
                         title = noText,
                         subtitle = noSubtitle,
@@ -123,13 +159,21 @@ fun DecisionScreen(
                         subtitleColor = DarkText.copy(alpha = 0.85f),
                         borderColor = DecisionPastelGreenBorder,
                         accessibilityDescription = "Opción no: $noSubtitle",
-                        onClick = onNoClick
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onNoClick()
+                        }
                     )
                 }
             }
 
-            // Sección Inferior (Footer): Principio de Equivalencia Multimodal
-            EquivalenceFooterSection(onClick = onVoiceResponseClick)
+            // Sección Inferior (Footer): Principio de Equivalencia Multimodal limpio como en los mockups
+            EquivalenceFooterSection(
+                onClick = {
+                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                    onVoiceResponseClick()
+                }
+            )
         }
     }
 }
@@ -142,14 +186,14 @@ private fun DecisionTitleSection(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .padding(top = 16.dp, bottom = 8.dp),
+            .padding(top = 4.dp, bottom = 8.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = question,
             style = MaterialTheme.typography.headlineLarge.copy(
-                fontSize = 29.sp,
-                lineHeight = 38.sp,
+                fontSize = 28.sp,
+                lineHeight = 37.sp,
                 fontWeight = FontWeight.Bold,
                 color = DarkText
             ),

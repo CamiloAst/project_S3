@@ -24,8 +24,8 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -40,6 +40,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.role
@@ -49,6 +51,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import uq.seminario.projects3.ui.components.AppNavigationHeader
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.DarkText
 import uq.seminario.projects3.ui.theme.ListeningTerracotta
@@ -59,18 +62,24 @@ import uq.seminario.projects3.ui.theme.ProjectS3Theme
 /**
  * Pantalla 1: Pantalla de Inicio / Escucha (VoiceInputScreen)
  *
- * Cumple estrictamente con accesibilidad gerontológica:
- * - Tipografía amplia (>=28sp títulos, >=20sp texto secundario/cuerpo).
- * - Botón central circular masivo (170dp) con touch target accesible.
- * - Alto contraste lumínico (#F6F3ED fondo, #1A1A1A texto).
- * - Transición suave sin parpadeos ni animaciones abruptas.
+ * Cumple estrictamente con accesibilidad gerontológica y el diseño original de los mockups:
+ * - Barra superior `AppNavigationHeader`:
+ *     * En `Idle`: muestra botón discreto "Salir" en la esquina superior derecha.
+ *     * En `Listening`: muestra "← Atrás" e "Inicio" para cancelar o regresar con seguridad.
+ * - Tipografía amplia (>=28sp títulos, >=20sp cuerpo).
+ * - Botón central circular masivo (170dp) con confirmación háptica.
  */
 @Composable
 fun VoiceInputScreen(
     isListening: Boolean,
     onMicClick: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onBackClick: () -> Unit = {},
+    onHomeClick: () -> Unit = {},
+    onExitClick: () -> Unit = {}
 ) {
+    val haptic = LocalHapticFeedback.current
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
         containerColor = BeigeBackground
@@ -79,12 +88,28 @@ fun VoiceInputScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 28.dp, vertical = 24.dp),
+                .padding(horizontal = 24.dp, vertical = 18.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.SpaceBetween
         ) {
-            // Sección Superior: Saludo y título
-            HeaderGreetingSection()
+            // Sección Superior: Barra de navegación + Saludo y título
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                AppNavigationHeader(
+                    isIdle = !isListening,
+                    showBackButton = isListening,
+                    showHomeButton = isListening,
+                    onBackClick = onBackClick,
+                    onHomeClick = onHomeClick,
+                    onExitClick = onExitClick
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                HeaderGreetingSection()
+            }
 
             // Sección Central: Botón circular prominente del micrófono con onda sutil
             Box(
@@ -95,11 +120,14 @@ fun VoiceInputScreen(
             ) {
                 ProminentMicButton(
                     isListening = isListening,
-                    onClick = onMicClick
+                    onClick = {
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onMicClick()
+                    }
                 )
             }
 
-            // Sección Inferior: Indicaciones de uso claras y directas
+            // Sección Inferior: Indicaciones de uso claras y limpias como en el mockup original
             InstructionFooterSection(isListening = isListening)
         }
     }
@@ -108,9 +136,7 @@ fun VoiceInputScreen(
 @Composable
 private fun HeaderGreetingSection(modifier: Modifier = Modifier) {
     Column(
-        modifier = modifier
-            .fillMaxWidth()
-            .padding(top = 16.dp),
+        modifier = modifier.fillMaxWidth(),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
@@ -123,7 +149,7 @@ private fun HeaderGreetingSection(modifier: Modifier = Modifier) {
             textAlign = TextAlign.Center
         )
 
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(8.dp))
 
         Text(
             text = "Estamos aquí para ayudarte",
@@ -144,7 +170,6 @@ private fun ProminentMicButton(
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    // Configuración de animación sutil de expansión para el estado Listening (onda calmada)
     val infiniteTransition = rememberInfiniteTransition(label = "pulse_transition")
     val waveScale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
@@ -165,7 +190,6 @@ private fun ProminentMicButton(
         label = "wave_alpha"
     )
 
-    // Color animado suavemente para evitar transiciones bruscas
     val buttonColor by animateColorAsState(
         targetValue = if (isListening) ListeningTerracotta else PrimaryDarkGreen,
         animationSpec = tween(durationMillis = 400),
@@ -183,7 +207,6 @@ private fun ProminentMicButton(
         modifier = modifier.size(240.dp),
         contentAlignment = Alignment.Center
     ) {
-        // Onda de expansión sutil detrás del botón (solo visible en estado Listening)
         if (isListening) {
             Box(
                 modifier = Modifier
@@ -194,7 +217,6 @@ private fun ProminentMicButton(
             )
         }
 
-        // Botón circular masivo principal (170dp, superando ampliamente los 150dp requeridos)
         Surface(
             modifier = Modifier
                 .size(170.dp)
@@ -221,7 +243,7 @@ private fun ProminentMicButton(
             ) {
                 Icon(
                     imageVector = if (isListening) Icons.Default.GraphicEq else Icons.Default.Mic,
-                    contentDescription = null, // Ya descrito en el contenedor semantics
+                    contentDescription = null,
                     tint = Color.White,
                     modifier = Modifier.size(54.dp)
                 )
@@ -259,7 +281,7 @@ private fun InstructionFooterSection(
         exit = fadeOut(animationSpec = tween(400)),
         modifier = modifier
             .fillMaxWidth()
-            .padding(bottom = 24.dp)
+            .padding(bottom = 16.dp)
     ) {
         Text(
             text = helperText,

@@ -18,10 +18,11 @@
   "author": "Senior Backend & AI Architect",
   "license": "MIT",
   "dependencies": {
-    "@google/generative-ai": "^0.24.0",
+    "@google/genai": "^2.32.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
-    "morgan": "^1.10.0"
+    "morgan": "^1.10.0",
+    "msedge-tts": "^2.1.1"
   }
 }

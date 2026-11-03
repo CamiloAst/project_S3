@@ -1,17 +1,24 @@
 # Cerebro IA Gerontológico - Backend API (Modelo CARE)
 
-API RESTful desarrollada con **Node.js**, **Express** y **Google Gemini (SDK Oficial @google/generative-ai)** diseñada como el cerebro conversacional para aplicaciones de asistencia y acompañamiento emocional a adultos mayores.
+API RESTful desarrollada con **Node.js**, **Express**, **Google Gemini (SDK oficial `@google/genai`)** y **Microsoft Edge Neural TTS (`msedge-tts`)** diseñada como el cerebro conversacional para aplicaciones de asistencia y acompañamiento emocional a adultos mayores.
 
 ---
 
-## 📋 Arquitectura y Principios del Modelo CARE
+## 📋 Modelo CARE de Interacción Multimodal
 
-La arquitectura está construida siguiendo la metodología **CARE** adaptada para la gerontología digital:
+La respuesta de la API está pensada para que la app Android combine sus modalidades según el **Modelo CARE**:
 
-* **C - Calma y Comprensión:** Cadencia pausada, frases cortas, sintaxis clara y validación emocional antes de emitir cualquier respuesta o recomendación.
-* **A - Autonomía y Dignidad:** Trato respetuoso entre adultos. Se erradica activamente la **infantilización** y el uso de diminutivos paternalistas (*abuelito*, *viejito*, *chiquito*).
-* **R - Redirección y Alivio:** Ante estados de ansiedad o rumiación solitaria, el modelo acoge primero el sentir y luego ofrece una actividad relajante, recuerdo grato o ejercicio de respiración.
-* **E - Ética y Emergencia:** Prohibición estricta de prescribir medicamentos, alterar dosis o diagnosticar. Detección inmediata de alertas vitales (dolor de pecho, caídas, ideación suicida) con activación del flag `emergency_alert`.
+* **C - Complementariedad:** `spoken_text` (voz) y `screen_text` (pantalla) se complementan: la voz da la respuesta completa y la pantalla un resumen corto de 4 a 7 palabras que nunca es copia literal.
+* **A - Asignación:** cada tarea va a la modalidad más eficiente; `suggested_action` indica a la app cuándo pasar la interacción a la pantalla (botones Sí/No, aclaración, alerta).
+* **R - Redundancia:** los mensajes críticos (p. ej. `emergency_alert`) se entregan a la vez en voz y en pantalla para evitar errores de comprensión.
+* **E - Equivalencia:** el usuario puede responder por voz o tocando la pantalla; el backend recibe el mismo texto sin importar el canal.
+
+### Pautas conversacionales del asistente
+
+* **Calma y claridad:** frases cortas, tono pausado y validación emocional antes de sugerir.
+* **Dignidad:** trato entre adultos, sin **infantilización** ni diminutivos paternalistas (*abuelito*, *viejito*, *chiquito*).
+* **Ética:** prohibido prescribir medicamentos, alterar dosis o diagnosticar.
+* **Posibles emergencias:** las expresiones de riesgo vital (dolor de pecho, caídas, ideación suicida) activan `emergency_alert`. El mensaje pide buscar ayuda de una persona cercana y **no promete** llamar ni avisar a nadie: en el ambiente de pruebas no existe ninguna integración con cuidadores ni servicios de emergencia.
 
 ---
 
@@ -20,10 +27,14 @@ La arquitectura está construida siguiendo la metodología **CARE** adaptada par
 ```text
 backend/
 ├── controllers/
-│   └── chatController.js       # Orquestación con Gemini SDK, System Prompt, Guardrails y Sesión
-├── package.json                # Dependencias (Express, @google/generative-ai, cors, etc.)
-├── server.js                   # Servidor Express, CORS, logging y middlewares de error
-├── test-api.js                 # Script de pruebas automatizadas de escenarios
+│   └── chatController.js       # Orquestación con @google/genai, System Prompt, Guardrails y Banco CARE
+├── services/
+│   ├── sessionStore.js         # Persistencia de sesiones (archivo JSON atómico, Redis o memoria)
+│   └── ttsService.js           # Síntesis de voz neural (msedge-tts) con modulación afectiva y fail-fast
+├── package.json                # Dependencias (Express, @google/genai, msedge-tts, cors, etc.)
+├── server.js                   # Servidor Express, CORS, healthcheck y cierre ordenado
+├── test-api.js                 # Script de pruebas automatizadas de escenarios CARE
+├── postman_collection.json     # Colección Postman para pruebas manuales
 ├── .env.example                # Variables de entorno de referencia
 └── README.md                   # Documentación técnica
 ```
@@ -52,11 +63,14 @@ Edita `.env` e ingresa tu clave:
 PORT=3000
 NODE_ENV=development
 GEMINI_API_KEY=AIzaSy...tu_clave_real_aqui
-GEMINI_MODEL=gemini-2.0-flash
+GEMINI_MODEL=gemini-3.5-flash
+GEMINI_TIMEOUT_MS=8000
+SESSION_STORE=file
+SESSION_FILE_PATH=./data/sessions.json
 SESSION_MAX_MESSAGES=6
 SESSION_TTL_MINUTES=60
 ```
-> **Nota:** Si no se define una `GEMINI_API_KEY`, el backend entra en **modo Mock Inteligente**, permitiendo probar todos los casos de uso y respuestas emocionales de inmediato sin costos de API.
+> **Nota:** Si no se define una `GEMINI_API_KEY`, el backend entra en **modo Banco CARE de Respaldo**, permitiendo probar todos los casos de uso y respuestas emocionales de inmediato sin costos de API.
 
 ### 4. Iniciar el Servidor
 ```bash
@@ -75,6 +89,7 @@ npm run dev
 Endpoint principal invocado por la app Android tras la transcripción de voz (STT).
 
 #### Request Body
+`sessionId` es **obligatorio** (1-128 caracteres: letras, números, `_`, `-`, `.` o `:`). La app Android envía un identificador único por instalación; si falta, la API responde `400`.
 ```json
 {
   "message": "Me siento muy solo hoy, mis hijos no me han llamado",
@@ -87,69 +102,46 @@ Endpoint principal invocado por la app Android tras la transcripción de voz (ST
 {
   "success": true,
   "sessionId": "elderly_user_123",
+  "source": "gemini",
   "data": {
-    "spoken_text": "Lamento mucho que te sientas así hoy. Es completamente comprensible extrañar a los hijos. Quiero que sepas que estoy aquí para acompañarte y conversar todo el tiempo que desees.",
-    "screen_text": "No estás solo, te acompaño",
-    "user_emotion": "tristeza",
-    "suggested_action": "continue"
+    "user_emotion": "NEGATIVA_TRISTEZA_SOLEDAD",
+    "spoken_text": "Lamento mucho que hoy se sienta tan silencioso el día y extrañes la llamada de tus hijos. Quiero que sepas que estoy aquí contigo para acompañarte con toda calma. ¿Te gustaría que platiquemos de algún recuerdo bonito junto a ellos?",
+    "screen_text": "Acompañamiento cálido en todo momento",
+    "suggested_action": "continue",
+    "audio_base64": "//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqq...",
+    "audio_duration_ms": 13450
   }
 }
 ```
 
-### Descripción de Campos de Salida:
+### Descripción de Campos de Salida (`data`):
 | Campo | Tipo | Canal | Descripción |
 |---|---|---|---|
-| `spoken_text` | `string` | **Voz (TTS)** | Texto cálido, conversacional y pausado para ser sintetizado a velocidad ~0.85x. |
-| `screen_text` | `string` | **Pantalla** | Apoyo visual ultra conciso (**máximo 5 a 7 palabras**) para no fatigar la visión ni sobrecargar la UI. |
-| `user_emotion` | `string` | **Tema UI** | Emoción detectada (`alegria`, `tristeza`, `ansiedad`, `soledad`, `calma`, `confusion`, `dolor`, `neutro`). Permite a Android modular la paleta de colores. |
-| `suggested_action` | `string` | **Control UI** | `continue` (charla normal), `show_decision_buttons` (mostrar botones accesibles Sí/No), `emergency_alert` (pantalla roja de socorro). |
+| `spoken_text` | `string` | **Voz (TTS)** | Texto cálido, conversacional y pausado (2–3 oraciones) para ser leído en voz alta. |
+| `screen_text` | `string` | **Pantalla** | Resumen o título complementario corto (**4 a 7 palabras**, nunca copia literal de `spoken_text`). |
+| `user_emotion` | `string` | **Emoción / Prosodia** | Categoría emocional clasificada por Gemini (o por el detector de respaldo): `POSITIVA`, `NEGATIVA_TRISTEZA_SOLEDAD`, `NEGATIVA_ANSIEDAD_PREOCUPACION`, `NEUTRA`, `AMBIGUA`. Modula la prosodia del TTS y la UI en Android. |
+| `suggested_action` | `string` | **Control UI** | `continue` (charla normal), `show_decision_buttons` (botones accesibles Sí/No), `clarify` (pedir aclaración amable), `emergency_alert` (pantalla de alerta de posible emergencia; sin llamadas ni avisos en el ambiente de pruebas). |
+| `audio_base64` | `string \| null` | **Audio Neural** | MP3 (24 kHz, 48 kbps mono) codificado en Base64 generado con `msedge-tts` (`es-CO-SalomeNeural`), o `null` si aplica fallback al TTS local de Android. |
+| `audio_duration_ms` | `number` | **Reloj Maestro** | Duración estimada/exacta del audio en milisegundos para sincronizar la interfaz. |
+
+En la raíz de la respuesta también se incluye `source` (`"gemini"`, `"fallback_bank"` o `"emergency_guardrail"`) y, cuando aplica el banco por fallo de red/API, `fallback_reason` (`"timeout"`, `"quota_exceeded"`, `"service_unavailable"`, etc.).
 
 ---
 
-## 🛡️ Guardrails y Mecanismos de Seguridad
+## 🛡️ Clasificación Emocional, Guardrails y Persistencia
 
-El backend implementa una **estrategia de defensa en profundidad**:
-
-1. **Pre-LLM Guardrail:** Intercepta expresiones críticas de riesgo vital (dolor agudo de pecho, caídas graves, asfixia, ideación suicida) en menos de 5 ms, forzando `emergency_alert` y generando una respuesta inmediata de calma sin depender de la latencia del modelo.
-2. **System Prompt Enforcement:** Reglas gerontológicas inyectadas a nivel de sistema que impiden prescripción de fármacos y prohíben la infantilización.
-3. **Post-LLM Guardrail & Sanitizer:**
-   - Detecta si el modelo incluyó términos prescriptivos de medicamentos ("toma x mg", "deja tu medicina") y los reemplaza por una derivación al médico de cabecera.
-   - Recorta automáticamente `screen_text` si el modelo excede las 7 palabras permitidas.
-   - Valida el catálogo de acciones y emociones autorizadas.
+1. **Pre-LLM Emergency Guardrail (< 5 ms):** Intercepta expresiones críticas de riesgo vital (dolor agudo de pecho, caídas graves, asfixia, ideación suicida) mediante expresiones regulares deterministas antes de llamar al LLM, forzando `emergency_alert`.
+2. **Clasificación Emocional con Gemini (Opción A):** Gemini clasifica la emoción del último mensaje en una de las 5 categorías (`user_emotion` con `enum` estricto en Structured Outputs) atendiendo negaciones y contexto (*"no me siento bien"*, *"buenas tardes"*, *"solo quería saludarte"*), y adapta la respuesta según la guía CARE correspondiente.
+3. **Banco de Respaldo y Anti-Repetición:** Si Gemini supera el timeout o no está disponible, se registra el motivo exacto del fallo y entra el detector por palabras clave + `RESPONSE_VARIATIONS_BANK` (6 variaciones por categoría sin repetición por sesión).
+4. **Post-LLM Medical Guardrail:** Detecta indicaciones de dosis o prescripción médica con límites de palabra (`\b`) sin falsos positivos en frases cotidianas como *"¿tomamos un respiro?"* o *"toma un vaso con agua"*.
+5. **Sesiones Persistentes (`services/sessionStore.js`):**
+   - `SESSION_STORE=file` (por defecto): guarda las sesiones en `data/sessions.json` con escritura atómica para sobrevivir a reinicios del servidor.
+   - `SESSION_STORE=redis`: almacena las sesiones en Redis (`REDIS_URL`) con expiración automática por TTL, recomendado para producción.
+   - `SESSION_STORE=memory`: solo en memoria RAM (pruebas).
 
 ---
 
 ## 📱 Conexión desde la Aplicación Android
 
-### Dirección de Red (Host)
 - **Desde el Emulador de Android:** `http://10.0.2.2:3000/api/chat`
 - **Desde un Dispositivo Físico (mismo Wi-Fi):** `http://192.168.X.X:3000/api/chat`
-
-### Ejemplo de Integración en Retrofit (Kotlin)
-
-```kotlin
-// Data Transfer Objects
-data class ChatRequest(
-    val message: String,
-    val sessionId: String = "android_user_session"
-)
-
-data class CareResponse(
-    val success: Boolean,
-    val sessionId: String,
-    val data: CarePayload
-)
-
-data class CarePayload(
-    @SerializedName("spoken_text") val spokenText: String,
-    @SerializedName("screen_text") val screenText: String,
-    @SerializedName("user_emotion") val userEmotion: String,
-    @SerializedName("suggested_action") val suggestedAction: String
-)
-
-// Interfaz del Servicio Retrofit
-interface ChatbotApiService {
-    @POST("api/chat")
-    suspend fun sendChatMessage(@Body request: ChatRequest): Response<CareResponse>
-}
-```

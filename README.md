@@ -1,6 +1,6 @@
 # Project S3 - Chatbot Asistente Gerontológico (Modelo CARE)
 
-Aplicación móvil Android y Backend de Inteligencia Artificial enfocado en el acompañamiento conversacional, apoyo emocional y asistencia accesible para adultos mayores, implementando los principios del **Modelo CARE**.
+Aplicación móvil Android y Backend de Inteligencia Artificial enfocado en el acompañamiento conversacional, apoyo emocional y asistencia accesible para adultos mayores. La interacción multimodal (voz, texto en pantalla, botones y vibración) se diseña siguiendo el **Modelo CARE** de interacción multimodal.
 
 ---
 
@@ -8,18 +8,31 @@ Aplicación móvil Android y Backend de Inteligencia Artificial enfocado en el a
 
 **Project S3** es una solución integral compuesta por:
 1. **Aplicación Android (Jetpack Compose & Kotlin)**: Interfaz de usuario diseñada con principios de diseño universal y accesibilidad gerontológica (altos contrastes, fuentes legibles, interacción optimizada por voz, botones táctiles amplios y pantallas de decisión simplificadas).
-2. **Backend API (Node.js, Express & Google Gemini AI)**: Servidor RESTful orquestador con Google Gemini (@google/generative-ai), provisto de un motor de prompts gerontológicos y salvaguardas (guardrails) de seguridad y ética.
+2. **Backend API (Node.js, Express & Google Gemini AI)**: Servidor RESTful orquestador con Google Gemini (`@google/genai`), síntesis de voz neural (`msedge-tts`), sesiones persistentes y salvaguardas (guardrails) de seguridad y ética.
 
 ---
 
-## 🧠 Principios del Modelo CARE
+## 🧠 Modelo CARE de Interacción Multimodal
 
-La experiencia de interacción se basa en la metodología **CARE** adaptada para la gerontología digital:
+**CARE** describe cómo se relacionan las distintas modalidades de interacción (voz, texto, botones, vibración) dentro del sistema:
 
-- **C - Calma y Comprensión:** Cadencia pausada, frases cortas, sintaxis clara y validación emocional antes de emitir cualquier sugerencia.
-- **A - Autonomía y Dignidad:** Trato respetuoso de adulto a adulto. Se erradica activamente la infantilización y el uso de diminutivos paternalistas (*abuelito*, *viejito*, etc.).
-- **R - Redirección y Alivio:** En momentos de rumiación, soledad o angustia, valida el sentir y propone actividades suaves (música, recuerdos gratos, ejercicios de respiración).
-- **E - Ética y Emergencia:** Prohibición estricta de formular diagnósticos o prescribir medicamentos. Detección inmediata de alertas vitales (caídas, dolor torácico, emergencias) activando el protocolo `emergency_alert`.
+| Propiedad | Significado | Cómo se aplica en Project S3 |
+|---|---|---|
+| **C - Complementariedad** (*Complementarity*) | Las distintas modalidades se complementan para transmitir un mensaje más rico. | La voz (`spoken_text`) entrega la respuesta completa y cálida, mientras la pantalla (`screen_text`) muestra un resumen corto de 4 a 7 palabras que **no** copia la locución. Los colores e íconos de la pantalla acompañan la emoción detectada. |
+| **A - Asignación** (*Assignment*) | Cada tarea se asigna a la modalidad más eficiente. | La conversación y las explicaciones van por **voz**; las decisiones Sí/No, la navegación (Atrás / Inicio) y la alerta de emergencia van en **pantalla** con botones grandes; la confirmación de cada toque va por **vibración** (háptica). |
+| **R - Redundancia** (*Redundancy*) | El mismo mensaje se envía por varios canales para evitar errores de comprensión. | Los mensajes críticos se dicen en voz alta **y** se muestran en pantalla a la vez: la pantalla de reparación ("No he entendido…") y la alerta de posible emergencia. El botón **Repetir** permite volver a escuchar la última respuesta. |
+| **E - Equivalencia** (*Equivalence*) | El usuario elige libremente qué modalidad usar para una misma acción. | En la pantalla de decisión se puede responder **tocando** Sí/No o **hablando**; para volver se puede usar el botón físico de Android o el botón "← Atrás" en pantalla. |
+
+### Pautas conversacionales gerontológicas
+
+Además del modelo CARE, el asistente sigue estas pautas en su contenido:
+
+- **Calma y claridad:** cadencia pausada (`~0.85x`), 2 a 3 oraciones cortas, lenguaje sencillo y validación emocional antes de sugerir algo.
+- **Dignidad:** trato respetuoso de adulto a adulto, sin infantilizar ni usar diminutivos paternalistas (*abuelito*, *viejito*, etc.).
+- **Ética:** prohibido diagnosticar, recetar o ajustar dosis de medicamentos (guardrail médico post-LLM).
+- **Posibles emergencias:** ante expresiones de riesgo vital (dolor en el pecho, caídas, dificultad para respirar, ideación suicida) se activa `emergency_alert`.
+
+> ⚠️ **Ambiente de pruebas:** la alerta de emergencia **solo** muestra una pantalla destacada y pide en voz y texto que el usuario busque ayuda de una persona cercana. La app **no realiza llamadas ni envía avisos** a cuidadores ni a servicios de emergencia, para evitar alertas falsas durante las pruebas.
 
 ---
 
@@ -31,16 +44,19 @@ projectS3/
 │   ├── src/main/java/uq/seminario/projects3/
 │   │   ├── audio/              # Motor de audio, STT y TTS (AudioEngine)
 │   │   ├── network/            # Cliente HTTP / Retrofit (ChatApiClient)
+│   │   ├── safety/             # Detector local de posibles emergencias (respaldo sin conexión)
+│   │   ├── session/            # Identificador de sesión único por instalación
 │   │   ├── ui/                 # Pantallas en Jetpack Compose, componentes y tema
-│   │   │   ├── components/     # Diálogos de permisos y componentes accesibles
-│   │   │   ├── screens/        # VoiceInputScreen, BotResponseScreen, DecisionScreen, RepairScreen
+│   │   │   ├── components/     # Encabezado de navegación, controles de lectura y diálogo de permisos
+│   │   │   ├── screens/        # VoiceInput, BotResponse, Recommendation, Decision, Repair y Emergency
 │   │   │   └── theme/          # Paleta accesible, tipografía y diseño
 │   │   ├── viewmodel/          # ChatbotViewModel y gestión de estados UI
 │   │   └── MainActivity.kt     # Punto de entrada de la aplicación
 │   └── build.gradle.kts        # Dependencias de Android y Jetpack Compose
 │
 ├── backend/                    # Servidor API REST
-│   ├── controllers/            # Lógica del orquestador y llamadas a Gemini SDK
+│   ├── controllers/            # Lógica del orquestador y llamadas a Gemini SDK (@google/genai)
+│   ├── services/               # TTS neural (ttsService.js) y sesiones persistentes (sessionStore.js)
 │   ├── .env.example            # Plantilla de variables de entorno
 │   ├── package.json            # Dependencias de Node.js
 │   ├── server.js               # Servidor Express, CORS y endpoints
@@ -61,7 +77,8 @@ projectS3/
 - **Jetpack Compose & Material 3**: UI moderna, fluida y adaptativa.
 - **Reconocimiento y Síntesis de Voz**: Flujo manos libres con lectura en voz alta pausada (`~0.85x`) y captura por micrófono.
 - **Manejo de Errores y Reparación Conversacional**: Pantalla de reparación (`RepairScreen`) amigable ante fallos de conexión o incomprensión auditiva.
-- **Detección de Emergencias**: Si el backend detecta una alerta crítica, la interfaz entra en modo de alerta destacada para facilitar auxilio.
+- **Alerta de Posible Emergencia**: Si el backend responde `emergency_alert` (o, sin conexión, el detector local reconoce una frase de riesgo), la app muestra la pantalla `EmergencyScreen`, vibra y lee el mensaje en voz alta pidiendo buscar ayuda de una persona cercana. En esta fase de pruebas **no se realizan llamadas ni avisos automáticos**.
+- **Sesión por Instalación**: Cada instalación genera un `sessionId` aleatorio (UUID) para que el historial conversacional de un usuario nunca se mezcle con el de otro dispositivo.
 
 ### Requisitos y Compilación
 - **Android Studio** (Koala / Ladybug o superior)

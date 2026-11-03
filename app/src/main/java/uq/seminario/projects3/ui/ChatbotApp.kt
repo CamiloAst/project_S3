@@ -1,10 +1,13 @@
 package uq.seminario.projects3.ui
 
 import android.Manifest
+import android.app.Activity
 import android.content.pm.PackageManager
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -42,20 +45,35 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import uq.seminario.projects3.ui.components.AudioPermissionDialog
 import uq.seminario.projects3.ui.screens.BotResponseScreen
 import uq.seminario.projects3.ui.screens.DecisionScreen
+import uq.seminario.projects3.ui.screens.EmergencyScreen
+import uq.seminario.projects3.ui.screens.RecommendationScreen
 import uq.seminario.projects3.ui.screens.RepairScreen
 import uq.seminario.projects3.ui.screens.VoiceInputScreen
 import uq.seminario.projects3.ui.theme.ActionDarkBlue
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.DarkText
+import uq.seminario.projects3.ui.theme.EmergencyRed
 import uq.seminario.projects3.ui.theme.ListeningTerracotta
 import uq.seminario.projects3.ui.theme.PrimaryDarkGreen
+import uq.seminario.projects3.ui.theme.SereneCalmAccent
+import uq.seminario.projects3.ui.theme.SereneWarmBackground
 import uq.seminario.projects3.viewmodel.ChatbotViewModel
 import uq.seminario.projects3.viewmodel.UiState
 
+private fun isAffectiveEmotion(emotion: String): Boolean {
+    val norm = emotion.uppercase()
+    return norm.contains("TRISTEZA") ||
+            norm.contains("SOLEDAD") ||
+            norm.contains("ANSIEDAD") ||
+            norm.contains("PREOCUPACION")
+}
+
 /**
- * Contenedor orquestador del Chatbot.
- * Conecta el StateHolder (ChatbotViewModel) con las vistas mediante StateFlow.
- * Gestiona de forma moderna los permisos de audio en tiempo de ejecución con rememberLauncherForActivityResult.
+ * Contenedor orquestador del Chatbot (Modelo CARE: Complementariedad, Asignación,
+ * Redundancia y Equivalencia entre voz, pantalla, botones y vibración).
+ * Conecta el StateHolder (ChatbotViewModel) con las vistas mediante StateFlow,
+ * gestiona el botón físico/sistema "Atrás" (`BackHandler`) y conecta los controles
+ * de navegación (`navigateBack`, `navigateHome`, `Salir`).
  */
 @Composable
 fun ChatbotApp(
@@ -64,7 +82,13 @@ fun ChatbotApp(
 ) {
     val context = LocalContext.current
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val isPaused by viewModel.isPaused.collectAsStateWithLifecycle()
     val showPermissionDialog by viewModel.showPermissionDialog.collectAsStateWithLifecycle()
+
+    // Soporte del botón físico/sistema "Atrás" de Android en todas las pantallas excepto Idle
+    BackHandler(enabled = uiState != UiState.Idle) {
+        viewModel.navigateBack()
+    }
 
     var hasAudioPermission by remember {
         mutableStateOf(
@@ -75,7 +99,6 @@ fun ChatbotApp(
         )
     }
 
-    // Launcher nativo moderno de Compose para solicitar permisos
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { isGranted ->
@@ -87,7 +110,6 @@ fun ChatbotApp(
         }
     }
 
-    // Diálogo accesible de solicitud de permiso
     if (showPermissionDialog) {
         AudioPermissionDialog(
             onGrantPermissionClick = {
@@ -100,14 +122,26 @@ fun ChatbotApp(
         )
     }
 
+    val currentEmotion = when (val state = uiState) {
+        is UiState.Speaking -> state.userEmotion
+        is UiState.AwaitingDecision -> state.userEmotion
+        else -> "NEUTRA"
+    }
+    val isAffectiveSupport = isAffectiveEmotion(currentEmotion)
+
+    val containerBackgroundColor by animateColorAsState(
+        targetValue = if (isAffectiveSupport) SereneWarmBackground else BeigeBackground,
+        animationSpec = tween(durationMillis = 600),
+        label = "scaffold_bg_color"
+    )
+
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        containerColor = BeigeBackground,
+        containerColor = containerBackgroundColor,
         bottomBar = {
-            // Barra auxiliar para demostración y evaluación rápida de todos los estados
             DemoStateSwitcherBar(
                 currentState = uiState,
-                onSelectIdle = { viewModel.resetToIdle() },
+                onSelectIdle = { viewModel.navigateHome() },
                 onSelectListening = {
                     viewModel.onMicClicked(
                         hasPermission = hasAudioPermission,
@@ -117,8 +151,16 @@ fun ChatbotApp(
                     )
                 },
                 onSelectSpeaking = { viewModel.stopListeningAndSpeak() },
+                onSelectAffective = {
+                    viewModel.stopListeningAndSpeak(
+                        screenText = "Acompañamiento cálido en todo momento",
+                        spokenText = "Comprendo que hoy el día se sienta silencioso para ti. Estoy aquí a tu lado para acompañarte. Inhala despacio y exhala con calma.",
+                        userEmotion = "NEGATIVA_TRISTEZA_SOLEDAD"
+                    )
+                },
                 onSelectDecision = { viewModel.askDecision() },
-                onSelectRepair = { viewModel.showRepairState() }
+                onSelectRepair = { viewModel.showRepairState() },
+                onSelectEmergency = { viewModel.showEmergencyState() }
             )
         }
     ) { innerPadding ->
@@ -146,7 +188,10 @@ fun ChatbotApp(
                                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     }
                                 )
-                            }
+                            },
+                            onBackClick = { viewModel.navigateBack() },
+                            onHomeClick = { viewModel.navigateHome() },
+                            onExitClick = { (context as? Activity)?.finish() }
                         )
                     }
 
@@ -160,16 +205,50 @@ fun ChatbotApp(
                                         permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     }
                                 )
-                            }
+                            },
+                            onBackClick = { viewModel.navigateBack() },
+                            onHomeClick = { viewModel.navigateHome() },
+                            onExitClick = { (context as? Activity)?.finish() }
                         )
                     }
 
                     is UiState.Speaking -> {
-                        BotResponseScreen(
-                            speechText = state.text,
-                            isPaused = state.isPaused,
-                            onTogglePause = { viewModel.toggleSpeakingPause() }
-                        )
+                        if (isAffectiveEmotion(state.userEmotion)) {
+                            RecommendationScreen(
+                                speechText = state.screenText,
+                                isPaused = state.isPaused,
+                                onTogglePause = { viewModel.toggleSpeakingPause() },
+                                onRepeatClick = { viewModel.repeatLastResponse() },
+                                onBackClick = { viewModel.navigateBack() },
+                                onHomeClick = { viewModel.navigateHome() },
+                                onSpeakClick = {
+                                    viewModel.onMicClicked(
+                                        hasPermission = hasAudioPermission,
+                                        onRequestPermission = {
+                                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    )
+                                }
+                            )
+                        } else {
+                            BotResponseScreen(
+                                speechText = state.screenText,
+                                isPaused = state.isPaused,
+                                userEmotion = state.userEmotion,
+                                onTogglePause = { viewModel.toggleSpeakingPause() },
+                                onRepeatClick = { viewModel.repeatLastResponse() },
+                                onBackClick = { viewModel.navigateBack() },
+                                onHomeClick = { viewModel.navigateHome() },
+                                onSpeakClick = {
+                                    viewModel.onMicClicked(
+                                        hasPermission = hasAudioPermission,
+                                        onRequestPermission = {
+                                            permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    )
+                                }
+                            )
+                        }
                     }
 
                     is UiState.AwaitingDecision -> {
@@ -179,9 +258,31 @@ fun ChatbotApp(
                             yesSubtitle = state.confirmOption.subtitle,
                             noText = state.dismissOption.title,
                             noSubtitle = state.dismissOption.subtitle,
+                            userEmotion = state.userEmotion,
                             onYesClick = { viewModel.onDecisionMade(true) },
                             onNoClick = { viewModel.onDecisionMade(false) },
                             onVoiceResponseClick = {
+                                viewModel.onMicClicked(
+                                    hasPermission = hasAudioPermission,
+                                    onRequestPermission = {
+                                        permissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                                    }
+                                )
+                            },
+                            onBackClick = { viewModel.navigateBack() },
+                            onHomeClick = { viewModel.navigateHome() }
+                        )
+                    }
+
+                    is UiState.Emergency -> {
+                        EmergencyScreen(
+                            screenText = state.screenText,
+                            isPaused = isPaused,
+                            onTogglePause = { viewModel.toggleSpeakingPause() },
+                            onRepeatClick = { viewModel.repeatLastResponse() },
+                            onBackClick = { viewModel.navigateBack() },
+                            onHomeClick = { viewModel.navigateHome() },
+                            onSpeakClick = {
                                 viewModel.onMicClicked(
                                     hasPermission = hasAudioPermission,
                                     onRequestPermission = {
@@ -195,6 +296,7 @@ fun ChatbotApp(
                     is UiState.Repair -> {
                         RepairScreen(
                             message = state.message,
+                            isPaused = isPaused,
                             onRetryClick = {
                                 viewModel.onMicClicked(
                                     hasPermission = hasAudioPermission,
@@ -203,9 +305,10 @@ fun ChatbotApp(
                                     }
                                 )
                             },
-                            onBackToHomeClick = {
-                                viewModel.resetToIdle()
-                            }
+                            onBackClick = { viewModel.navigateBack() },
+                            onBackToHomeClick = { viewModel.navigateHome() },
+                            onTogglePauseClick = { viewModel.toggleSpeakingPause() },
+                            onRepeatClick = { viewModel.repeatLastResponse() }
                         )
                     }
                 }
@@ -214,17 +317,16 @@ fun ChatbotApp(
     }
 }
 
-/**
- * Selector accesible para alternar o evaluar rápidamente cada estado solicitado en la rúbrica.
- */
 @Composable
 private fun DemoStateSwitcherBar(
     currentState: UiState,
     onSelectIdle: () -> Unit,
     onSelectListening: () -> Unit,
     onSelectSpeaking: () -> Unit,
+    onSelectAffective: () -> Unit,
     onSelectDecision: () -> Unit,
     onSelectRepair: () -> Unit,
+    onSelectEmergency: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -235,16 +337,16 @@ private fun DemoStateSwitcherBar(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp, vertical = 6.dp)
         ) {
             Text(
-                text = "Modo de prueba (Estados del Chatbot):",
+                text = "Modo de prueba (Estados del Chatbot CARE):",
                 style = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 13.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = DarkText
                 ),
-                modifier = Modifier.padding(bottom = 4.dp)
+                modifier = Modifier.padding(bottom = 2.dp)
             )
 
             Row(
@@ -275,7 +377,8 @@ private fun DemoStateSwitcherBar(
                 )
 
                 FilterChip(
-                    selected = currentState is UiState.Speaking,
+                    selected = currentState is UiState.Speaking &&
+                            !isAffectiveEmotion(currentState.userEmotion),
                     onClick = onSelectSpeaking,
                     label = { Text("3. Bot Habla", fontSize = 13.sp) },
                     colors = FilterChipDefaults.filterChipColors(
@@ -285,9 +388,20 @@ private fun DemoStateSwitcherBar(
                 )
 
                 FilterChip(
+                    selected = currentState is UiState.Speaking &&
+                            isAffectiveEmotion(currentState.userEmotion),
+                    onClick = onSelectAffective,
+                    label = { Text("4. Afectivo (Calma)", fontSize = 13.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = SereneCalmAccent,
+                        selectedLabelColor = Color.White
+                    )
+                )
+
+                FilterChip(
                     selected = currentState is UiState.AwaitingDecision,
                     onClick = onSelectDecision,
-                    label = { Text("4. Decisión", fontSize = 13.sp) },
+                    label = { Text("5. Decisión", fontSize = 13.sp) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = ActionDarkBlue,
                         selectedLabelColor = Color.White
@@ -297,9 +411,19 @@ private fun DemoStateSwitcherBar(
                 FilterChip(
                     selected = currentState is UiState.Repair,
                     onClick = onSelectRepair,
-                    label = { Text("5. Lupa (Reparación)", fontSize = 13.sp) },
+                    label = { Text("6. Lupa (Reparación)", fontSize = 13.sp) },
                     colors = FilterChipDefaults.filterChipColors(
                         selectedContainerColor = ListeningTerracotta,
+                        selectedLabelColor = Color.White
+                    )
+                )
+
+                FilterChip(
+                    selected = currentState is UiState.Emergency,
+                    onClick = onSelectEmergency,
+                    label = { Text("7. Emergencia (sin llamadas)", fontSize = 13.sp) },
+                    colors = FilterChipDefaults.filterChipColors(
+                        selectedContainerColor = EmergencyRed,
                         selectedLabelColor = Color.White
                     )
                 )

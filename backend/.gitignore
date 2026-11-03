@@ -1,4 +1,6 @@
 node_modules/
 .env
+data/
+*.corrupt-*
 npm-debug.log*
 .DS_Store
