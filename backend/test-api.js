@@ -1,4 +1,7 @@
 // test-api.js
+// Lee API_ACCESS_TOKEN desde .env para autenticarse igual que la app Android
+require("dotenv").config();
+
 const testCases = [
   {
     name: "1. POSITIVA (Reforzar la situación)",
@@ -60,7 +63,10 @@ async function runTests() {
     try {
       const res = await fetch("http://localhost:3000/api/chat", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(process.env.API_ACCESS_TOKEN ? { Authorization: `Bearer ${process.env.API_ACCESS_TOKEN}` } : {})
+        },
         body: JSON.stringify(tc.payload)
       });
       const data = await res.json();

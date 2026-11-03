@@ -55,8 +55,7 @@ class AudioEngine(
     private var isVoiceMuted: Boolean = false
 
     @Volatile
-    private var lastSpokenText: String =
-        "Claro. Tu cita médica está programada para mañana a las diez y media de la mañana en el centro de salud San José."
+    private var lastSpokenText: String = ""
 
     @Volatile
     private var activeUtteranceId: String? = null

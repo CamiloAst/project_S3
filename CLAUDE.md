@@ -29,6 +29,8 @@ Tone rules (calm, no infantilizing diminutives, no prescribing medication) are s
 ./gradlew :app:testDebugUnitTest        # JVM unit tests
 ./gradlew :app:testDebugUnitTest --tests "uq.seminario.projects3.safety.EmergencyDetectorTest"   # single test class
 ```
+Release builds stop at `preReleaseBuild` unless `care.apiBaseUrl.release=https://...` is set (in `local.properties` or `-P`).
+
 On this Windows machine the global `JAVA_HOME` points to a missing JRE and a stale Gradle daemon may use a JRE without `jlink`. Use Android Studio's JDK (PowerShell):
 ```powershell
 $env:JAVA_HOME = "E:\Program Files\Android\Android Studio\jbr"
@@ -41,22 +43,28 @@ $env:JAVA_HOME = "E:\Program Files\Android\Android Studio\jbr"
 npm install
 cp .env.example .env      # set GEMINI_API_KEY; without it the API answers from the fallback bank
 npm run dev               # node --watch server.js (port 3000)
-node test-api.js          # manual scenario script; needs the server already running, no assertions
+npm test                  # node:test suite in backend/test/ (emergency detector + security middleware)
+node --test test/security.test.js   # single test file
+node test-api.js          # manual scenario script; needs the server running, no assertions
 ```
-`SESSION_STORE=memory` avoids writing `backend/data/sessions.json` during experiments. There is no automated backend test suite or linter.
+`SESSION_STORE=memory` avoids writing `backend/data/sessions.json` during experiments. There is no linter. Never read or print `backend/.env` (it holds the real Gemini key).
+
+### App ↔ backend configuration
+Android reads, from `local.properties` (not versioned) or `-P`: `care.apiBaseUrl.debug` (default `http://10.0.2.2:3000/`), `care.apiBaseUrl.release` (must be HTTPS) and `care.apiToken`, exposed as `BuildConfig.CARE_API_BASE_URL` / `CARE_API_TOKEN`. `care.apiToken` must equal the backend's `API_ACCESS_TOKEN` (required when `NODE_ENV=production`); the app sends it as `Authorization: Bearer`. Cleartext HTTP is allowed only by `app/src/debug/AndroidManifest.xml`. The `DemoStateSwitcherBar` and full HTTP body logging exist only in debug builds.
 
 ## Architecture
 
 ### Request flow
 1. `AudioEngine` (Android SpeechRecognizer) transcribes speech → `ChatbotViewModel.handleSpeechRecognitionResult`.
-2. `ChatApiClient` (Retrofit) `POST /api/chat` with `{ message, sessionId }`. Base URL is hardcoded to the emulator host `http://10.0.2.2:3000/`.
+2. `ChatApiClient` (Retrofit) `POST /api/chat` with `{ message, sessionId }` and the bearer token. `server.js` applies a per-IP rate limit and `requireApiToken` (`middleware/security.js`) before the controller.
 3. `backend/controllers/chatController.js` `handleChat`:
-   - pre-LLM emergency regex (`CRITICAL_EMERGENCY_REGEX`) → short-circuits to `source: "emergency_guardrail"`;
+   - pre-LLM emergency check (`isCriticalRisk` from `services/emergencyDetector.js`) → short-circuits to `source: "emergency_guardrail"`;
    - otherwise Gemini with structured JSON output (`careResponseSchema`) and the system prompt `GERONTOLOGICAL_SYSTEM_PROMPT`; Gemini also classifies `user_emotion` (5 fixed categories);
    - on any Gemini failure/timeout → keyword detector + `RESPONSE_VARIATIONS_BANK` with per-session anti-repetition (`source: "fallback_bank"`, `fallback_reason` set);
    - `sanitizeAndEnforceGuardrails` post-processes every answer (medical-prescription filter, screen_text length, enum validation);
    - session history persisted via `services/sessionStore.js` (`file` | `redis` | `memory`);
-   - `services/ttsService.js` synthesizes MP3 with emotion-based prosody; it fails fast and returns `audio_base64: null` so the app falls back to local TTS.
+   - `services/ttsService.js` synthesizes MP3 with emotion-based prosody; it fails fast and returns `audio_base64: null` so the app falls back to local TTS. TTS is skipped when `elapsed + TTS_WORST_CASE_MS` would exceed `CHAT_RESPONSE_BUDGET_MS` (18 s).
+   - Timeouts are coupled: the backend budget must stay below the app's `readTimeout` (25 s in `ChatApiClient.kt`); otherwise the app shows its local fallback while the backend already saved a different turn in the session history.
 4. `ChatbotViewModel.executeMasterClockSync` plays the neural MP3 (MediaPlayer) or local TTS and maps `suggested_action` to a `UiState`:
    `continue`/`clarify` → `Speaking` (affective emotions render `RecommendationScreen`, others `BotResponseScreen`), `show_decision_buttons` → `AwaitingDecision`, `emergency_alert` → `Emergency`, `retry` → `Repair`.
 5. If the HTTP call fails, `generateLocalFallbackChatData` builds a local response (emergency check first).
@@ -65,7 +73,7 @@ node test-api.js          # manual scenario script; needs the server already run
 Response `data` fields: `spoken_text`, `screen_text`, `user_emotion` (`POSITIVA`, `NEGATIVA_TRISTEZA_SOLEDAD`, `NEGATIVA_ANSIEDAD_PREOCUPACION`, `NEUTRA`, `AMBIGUA`), `suggested_action` (`continue`, `show_decision_buttons`, `clarify`, `emergency_alert`), `audio_base64`, `audio_duration_ms`. Changing a field or enum requires updating the Gemini schema, the fallback bank, `ChatData` in `ChatApiClient.kt` and the ViewModel mapping together.
 
 ### Things that must stay in sync
-- **Emergency phrases**: `CRITICAL_EMERGENCY_REGEX` in `chatController.js` and `safety/EmergencyDetector.kt` (Kotlin version matches on accent-stripped lowercase text).
+- **Emergency phrases**: `EMERGENCY_PATTERNS` in `backend/services/emergencyDetector.js` and in `app/.../safety/EmergencyDetector.kt` (both match on lowercase, accent- and punctuation-stripped text). Both test suites read the same cases from `backend/test/emergency-cases.json`; add a case there for every new phrase and run `npm test` and `:app:testDebugUnitTest`.
 - **Emergency messages**: `EMERGENCY_SPOKEN_TEXT` / `EMERGENCY_SCREEN_TEXT` in `chatController.js` and `UiState.EMERGENCY_*` in `ChatbotViewModel.kt`.
 - **Test environment rule**: the emergency flow only shows `EmergencyScreen` and asks the user to seek help from someone nearby. Do **not** add phone numbers, dialing, SMS or caregiver notifications, and never let the prompt or texts claim the app will call/notify anyone.
 

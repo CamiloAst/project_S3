@@ -35,8 +35,8 @@ sealed interface UiState {
     data object Idle : UiState
     data object Listening : UiState
     data class Speaking(
-        val screenText: String = "Cita médica: mañana 10:30 AM",
-        val spokenText: String = "Claro. Tu cita médica está programada para mañana a las diez y media de la mañana en el centro de salud San José.",
+        val screenText: String = "Listo para conversar contigo",
+        val spokenText: String = "Qué gusto saludarte. Estoy aquí para conversar contigo con calma sobre lo que quieras. ¿Cómo va tu día?",
         val userEmotion: String = "NEUTRA",
         val isPaused: Boolean = false
     ) : UiState
@@ -103,9 +103,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
     private val _isVoiceMuted = MutableStateFlow(false)
     val isVoiceMuted: StateFlow<Boolean> = _isVoiceMuted.asStateFlow()
 
-    private val _lastSpokenText = MutableStateFlow(
-        "Claro. Tu cita médica está programada para mañana a las diez y media de la mañana en el centro de salud San José."
-    )
+    // Vacío al iniciar: "Repetir" no debe leer contenido inventado antes de la primera respuesta
+    private val _lastSpokenText = MutableStateFlow("")
     val lastSpokenText: StateFlow<String> = _lastSpokenText.asStateFlow()
 
     // Estado del diálogo accesible de permisos
@@ -678,8 +677,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
     // =========================================================================
 
     fun stopListeningAndSpeak(
-        screenText: String = "Cita médica programada para mañana",
-        spokenText: String = "Claro. Tu cita médica está programada para mañana a las diez y media de la mañana en el centro de salud San José.",
+        screenText: String = "Listo para conversar contigo",
+        spokenText: String = "Qué gusto saludarte. Estoy aquí para conversar contigo con calma sobre lo que quieras. ¿Cómo va tu día?",
         userEmotion: String = "NEUTRA"
     ) {
         activeChatJob?.cancel()

@@ -410,7 +410,7 @@ private fun BotResponseFooterSection(
 private fun BotResponseScreenSpeakingPreview() {
     ProjectS3Theme {
         BotResponseScreen(
-            speechText = "Cita médica programada para mañana",
+            speechText = "Listo para conversar contigo",
             isPaused = false,
             onTogglePause = {},
             onSpeakClick = {}

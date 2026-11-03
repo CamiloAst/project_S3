@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import uq.seminario.projects3.BuildConfig
 import uq.seminario.projects3.ui.components.AudioPermissionDialog
 import uq.seminario.projects3.ui.screens.BotResponseScreen
 import uq.seminario.projects3.ui.screens.DecisionScreen
@@ -139,7 +140,8 @@ fun ChatbotApp(
         modifier = modifier.fillMaxSize(),
         containerColor = containerBackgroundColor,
         bottomBar = {
-            DemoStateSwitcherBar(
+            // Barra de pruebas para forzar cada estado: nunca visible en builds release
+            if (BuildConfig.DEBUG) DemoStateSwitcherBar(
                 currentState = uiState,
                 onSelectIdle = { viewModel.navigateHome() },
                 onSelectListening = {

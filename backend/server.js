@@ -16,9 +16,22 @@ const {
   getAiStatus,
   sessionStore
 } = require("./controllers/chatController");
+const {
+  requireApiToken,
+  chatRateLimiter,
+  sessionRateLimiter,
+  buildCorsOptions,
+  isTokenRequired
+} = require("./middleware/security");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+app.disable("x-powered-by");
+// Detrás de un proxy (ngrok, Render, Nginx) el límite por IP necesita la IP real del cliente
+if (process.env.TRUST_PROXY) {
+  app.set("trust proxy", /^\d+$/.test(process.env.TRUST_PROXY) ? Number(process.env.TRUST_PROXY) : process.env.TRUST_PROXY);
+}
 
 // =============================================================================
 // 1. CONFIGURACIÓN DE MIDDLEWARES
@@ -27,17 +40,11 @@ const PORT = process.env.PORT || 3000;
 // Logger HTTP para monitorear peticiones en consola
 app.use(morgan(process.env.NODE_ENV === "production" ? "combined" : "dev"));
 
-// Configuración de CORS permisivo para desarrollo y apps móviles Android
-const corsOptions = {
-  origin: "*", // En producción se recomienda limitar a dominios específicos
-  methods: ["GET", "POST", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
-};
-app.use(cors(corsOptions));
+// CORS solo para orígenes declarados en CORS_ORIGINS (la app Android no usa CORS)
+app.use(cors(buildCorsOptions()));
 
-// Parseo de cuerpo JSON y URL-Encoded
-app.use(express.json({ limit: "2mb" }));
-app.use(express.urlencoded({ extended: true, limit: "2mb" }));
+// Parseo de cuerpo JSON (los mensajes están limitados a 2000 caracteres en el controlador)
+app.use(express.json({ limit: "32kb" }));
 
 // Middleware para registrar la latencia de cada solicitud
 app.use((req, res, next) => {
@@ -67,6 +74,7 @@ const healthHandler = (req, res) => {
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
     sessionStore: sessionStore.kind,
+    authRequired: isTokenRequired(),
     aiProvider: getAiStatus()
   });
 };
@@ -79,13 +87,13 @@ app.get("/api/health", healthHandler);
  * Recibe el texto transcrito (STT) desde Android y retorna el esquema multimodal CARE.
  * POST /api/chat
  */
-app.post("/api/chat", handleChat);
+app.post("/api/chat", chatRateLimiter, requireApiToken, handleChat);
 
 /**
- * Endpoints auxiliares para gestión de sesiones en memoria
+ * Endpoints auxiliares para gestión de sesiones (protegidos con el mismo token)
  */
-app.get("/api/chat/session/:sessionId", getSessionInfo);
-app.delete("/api/chat/session/:sessionId", clearSession);
+app.get("/api/chat/session/:sessionId", sessionRateLimiter, requireApiToken, getSessionInfo);
+app.delete("/api/chat/session/:sessionId", sessionRateLimiter, requireApiToken, clearSession);
 
 // =============================================================================
 // 3. MANEJO DE RUTAS NO ENCONTRADAS (404) Y ERRORES GLOBALES
