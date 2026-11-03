@@ -2,14 +2,19 @@ package uq.seminario.projects3.ui.screens
 
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -24,7 +29,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -33,13 +37,20 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.Role
@@ -51,6 +62,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.flow.collectLatest
 import uq.seminario.projects3.ui.components.AppNavigationHeader
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.DarkText
@@ -58,6 +70,15 @@ import uq.seminario.projects3.ui.theme.ListeningTerracotta
 import uq.seminario.projects3.ui.theme.MutedDarkText
 import uq.seminario.projects3.ui.theme.PrimaryDarkGreen
 import uq.seminario.projects3.ui.theme.ProjectS3Theme
+import kotlin.math.PI
+import kotlin.math.sin
+
+// Altura relativa de cada barra del ecualizador (la central reacciona más a la voz)
+private val VOICE_BAR_WEIGHTS = floatArrayOf(0.55f, 0.85f, 1f, 0.85f, 0.55f)
+// Altura mínima de las barras en silencio, para que el icono siga reconociéndose
+private const val VOICE_BAR_MIN_FRACTION = 0.2f
+// Cuánto crece el halo detrás del botón con la voz más fuerte (+30 %)
+private const val VOICE_HALO_MAX_GROWTH = 0.3f
 
 /**
  * Pantalla 1: Pantalla de Inicio / Escucha (VoiceInputScreen)
@@ -68,12 +89,15 @@ import uq.seminario.projects3.ui.theme.ProjectS3Theme
  *     * En `Listening`: muestra "← Atrás" e "Inicio" para cancelar o regresar con seguridad.
  * - Tipografía amplia (>=28sp títulos, >=20sp cuerpo).
  * - Botón central circular masivo (170dp) con confirmación háptica.
+ * - En `Listening`, las barras del icono y el halo del botón se mueven con el volumen de la voz
+ *   (`voiceLevel`, de 0 a 1) para que el usuario vea que se le está escuchando.
  */
 @Composable
 fun VoiceInputScreen(
     isListening: Boolean,
     onMicClick: () -> Unit,
     modifier: Modifier = Modifier,
+    voiceLevel: () -> Float = { 0f },
     onBackClick: () -> Unit = {},
     onHomeClick: () -> Unit = {},
     onExitClick: () -> Unit = {}
@@ -120,6 +144,7 @@ fun VoiceInputScreen(
             ) {
                 ProminentMicButton(
                     isListening = isListening,
+                    voiceLevel = voiceLevel,
                     onClick = {
                         haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                         onMicClick()
@@ -167,9 +192,23 @@ private fun HeaderGreetingSection(modifier: Modifier = Modifier) {
 @Composable
 private fun ProminentMicButton(
     isListening: Boolean,
+    voiceLevel: () -> Float,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Nivel de voz suavizado con un resorte: sube y baja sin saltos bruscos. Se lee solo en
+    // graphicsLayer/Canvas, así que los cambios de volumen redibujan sin recomponer
+    val smoothedVoiceLevel = remember { Animatable(0f) }
+    val currentVoiceLevel by rememberUpdatedState(voiceLevel)
+    LaunchedEffect(Unit) {
+        snapshotFlow { currentVoiceLevel() }.collectLatest { level ->
+            smoothedVoiceLevel.animateTo(
+                targetValue = level,
+                animationSpec = spring(stiffness = Spring.StiffnessMediumLow)
+            )
+        }
+    }
+
     val infiniteTransition = rememberInfiniteTransition(label = "pulse_transition")
     val waveScale by infiniteTransition.animateFloat(
         initialValue = 1.0f,
@@ -208,12 +247,28 @@ private fun ProminentMicButton(
         contentAlignment = Alignment.Center
     ) {
         if (isListening) {
+            // Onda constante: indica que el micrófono sigue abierto aunque haya silencio
             Box(
                 modifier = Modifier
                     .size(176.dp)
                     .scale(waveScale)
                     .clip(CircleShape)
                     .background(ListeningTerracotta.copy(alpha = waveAlpha))
+            )
+
+            // Halo que asoma detrás del botón y crece con el volumen de la voz
+            Box(
+                modifier = Modifier
+                    .size(170.dp)
+                    .graphicsLayer {
+                        val level = smoothedVoiceLevel.value
+                        val growth = 1f + VOICE_HALO_MAX_GROWTH * level
+                        scaleX = growth
+                        scaleY = growth
+                        alpha = 0.4f + 0.6f * level
+                    }
+                    .clip(CircleShape)
+                    .background(ListeningTerracotta.copy(alpha = 0.35f))
             )
         }
 
@@ -241,12 +296,20 @@ private fun ProminentMicButton(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.Center
             ) {
-                Icon(
-                    imageVector = if (isListening) Icons.Default.GraphicEq else Icons.Default.Mic,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(54.dp)
-                )
+                if (isListening) {
+                    VoiceLevelBars(
+                        level = { smoothedVoiceLevel.value },
+                        color = Color.White,
+                        modifier = Modifier.size(width = 60.dp, height = 54.dp)
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Mic,
+                        contentDescription = null,
+                        tint = Color.White,
+                        modifier = Modifier.size(54.dp)
+                    )
+                }
 
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -260,6 +323,47 @@ private fun ProminentMicButton(
                     textAlign = TextAlign.Center
                 )
             }
+        }
+    }
+}
+
+/**
+ * Icono de escucha en forma de ecualizador: la altura de las barras sigue el volumen de la voz.
+ * En silencio quedan bajas y quietas; con voz se mueven con una ligera ondulación desfasada.
+ */
+@Composable
+private fun VoiceLevelBars(
+    level: () -> Float,
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    val wobblePhase by rememberInfiniteTransition(label = "bars_transition").animateFloat(
+        initialValue = 0f,
+        targetValue = (2 * PI).toFloat(),
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "bars_wobble"
+    )
+
+    Canvas(modifier = modifier) {
+        val barCount = VOICE_BAR_WEIGHTS.size
+        val gap = size.width * 0.08f
+        val barWidth = (size.width - gap * (barCount - 1)) / barCount
+        val currentLevel = level()
+
+        VOICE_BAR_WEIGHTS.forEachIndexed { index, weight ->
+            val wobble = 0.8f + 0.2f * sin(wobblePhase + index * 1.3f)
+            val fraction = VOICE_BAR_MIN_FRACTION +
+                    (1f - VOICE_BAR_MIN_FRACTION) * currentLevel * weight * wobble
+            val barHeight = size.height * fraction
+            drawRoundRect(
+                color = color,
+                topLeft = Offset(index * (barWidth + gap), (size.height - barHeight) / 2f),
+                size = Size(barWidth, barHeight),
+                cornerRadius = CornerRadius(barWidth / 2f)
+            )
         }
     }
 }
@@ -314,7 +418,8 @@ private fun VoiceInputScreenListeningPreview() {
     ProjectS3Theme {
         VoiceInputScreen(
             isListening = true,
-            onMicClick = {}
+            onMicClick = {},
+            voiceLevel = { 0.6f }
         )
     }
 }

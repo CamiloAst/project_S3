@@ -30,11 +30,15 @@ data class DecisionOption(
 
 /**
  * Estados de UI requeridos para el chatbot de acompañamiento gerontológico (Modelo CARE).
- * Nota estricta de UX: No existe estado intermedio de "Pensando..." o "Procesando...".
  */
 sealed interface UiState {
     data object Idle : UiState
     data object Listening : UiState
+    /**
+     * Espera entre el fin de la voz del usuario y la respuesta (transcripción + backend).
+     * Es transitorio como `Listening`: nunca se guarda en el historial de navegación.
+     */
+    data object Thinking : UiState
     data class Speaking(
         val screenText: String = "Listo para conversar contigo",
         val spokenText: String = "Qué gusto saludarte. Estoy aquí para conversar contigo con calma sobre lo que quieras. ¿Cómo va tu día?",
@@ -124,6 +128,10 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
     private val _showPermissionDialog = MutableStateFlow(false)
     val showPermissionDialog: StateFlow<Boolean> = _showPermissionDialog.asStateFlow()
 
+    // Volumen de la voz del usuario (0 = silencio, 1 = voz fuerte) mientras se escucha
+    private val _voiceLevel = MutableStateFlow(0f)
+    val voiceLevel: StateFlow<Float> = _voiceLevel.asStateFlow()
+
     // Referencia a la petición HTTP en curso para cancelarla si el usuario interrumpe
     private var activeChatJob: Job? = null
 
@@ -147,6 +155,14 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         },
         onSpeechError = { errorCode ->
             handleSpeechRecognitionError(errorCode)
+        },
+        onSpeechEnded = {
+            handleEndOfSpeech()
+        },
+        onVoiceLevelChanged = { level ->
+            if (_uiState.value is UiState.Listening) {
+                _voiceLevel.value = level
+            }
         },
         onTtsFinished = {
             handleTtsPlaybackFinished()
@@ -296,9 +312,9 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         }
 
         if (current != newState) {
-            // Se guarda el estado anterior en la pila (evitando apilar el estado transitorio Listening
-            // cuando el micrófono pasa automáticamente a la respuesta del bot).
-            if (current !is UiState.Listening) {
+            // Se guarda el estado anterior en la pila (evitando apilar los estados transitorios
+            // Listening y Thinking cuando el micrófono pasa automáticamente a la respuesta del bot).
+            if (current !is UiState.Listening && current !is UiState.Thinking) {
                 val stateToPush = if (current is UiState.Speaking) {
                     current.copy(isPaused = true)
                 } else {
@@ -391,8 +407,15 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                 startListeningWithHaptics()
             }
             is UiState.Listening -> {
+                // El usuario terminó de hablar: se transcribe lo capturado y se pasa a "Pensando"
                 audioEngine.stopListening()
                 audioEngine.triggerHapticFeedback()
+                handleEndOfSpeech()
+            }
+            is UiState.Thinking -> {
+                // Descarta la transcripción o la respuesta en curso y vuelve a escuchar
+                audioEngine.cancelListening()
+                startListeningWithHaptics()
             }
         }
     }
@@ -401,6 +424,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         stopMediaPlayerAndTts()
         audioEngine.triggerHapticFeedback()
         _isPaused.value = true
+        _voiceLevel.value = 0f
         transitionToState(UiState.Listening)
         audioEngine.startListening()
     }
@@ -418,7 +442,24 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
     // 3. ORQUESTACIÓN STT -> BACKEND -> DISPARO SÍNCRONO (RELOJ MAESTRO FASE 1)
     // =========================================================================
 
+    /**
+     * true mientras se espera algo del reconocedor. Un resultado o error que llega cuando el
+     * usuario ya se fue con "Atrás" o "Inicio" se descarta en vez de abrir otra pantalla.
+     */
+    private fun isAwaitingSpeechResult(): Boolean =
+        _uiState.value is UiState.Listening || _uiState.value is UiState.Thinking
+
+    /** Fin de la voz del usuario: mientras se transcribe y se consulta al backend se muestra "Pensando". */
+    private fun handleEndOfSpeech() {
+        _voiceLevel.value = 0f
+        if (_uiState.value is UiState.Listening) {
+            transitionToState(UiState.Thinking)
+        }
+    }
+
     private fun handleSpeechRecognitionResult(transcribedText: String) {
+        if (!isAwaitingSpeechResult()) return
+        handleEndOfSpeech()
         activeChatJob?.cancel()
         activeChatJob = viewModelScope.launch {
             val result = ChatApiClient.sendChatMessage(
@@ -526,7 +567,12 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
     }
 
     private fun handleSpeechRecognitionError(errorCode: Int) {
+        if (!isAwaitingSpeechResult()) {
+            Log.d(TAG, "Fallo en STT (código $errorCode) ignorado: ya no se está escuchando.")
+            return
+        }
         Log.d(TAG, "Fallo en STT (código $errorCode). Navegando a pantalla de reparación.")
+        _voiceLevel.value = 0f
         stopMediaPlayerAndTts()
         val recognitionUnavailable = errorCode == AudioEngine.ERROR_RECOGNITION_UNAVAILABLE
         val repairMessage = if (recognitionUnavailable) {
@@ -770,75 +816,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
     }
 
     // =========================================================================
-    // 5. MÉTODOS AUXILIARES PARA BARRA DE DEMOSTRACIÓN
-    // =========================================================================
-
-    fun stopListeningAndSpeak(
-        screenText: String = "Listo para conversar contigo",
-        spokenText: String = "Qué gusto saludarte. Estoy aquí para conversar contigo con calma sobre lo que quieras. ¿Cómo va tu día?",
-        userEmotion: String = "NEUTRA"
-    ) {
-        activeChatJob?.cancel()
-        stopMediaPlayerAndTts()
-        audioEngine.cancelListening()
-        _lastSpokenText.value = spokenText
-        val pausedState = startsPaused()
-        _isPaused.value = pausedState
-        audioEngine.speak(spokenText)
-        transitionToState(
-            UiState.Speaking(
-                screenText = screenText,
-                spokenText = spokenText,
-                userEmotion = userEmotion,
-                isPaused = pausedState
-            )
-        )
-    }
-
-    fun askDecision(
-        question: String = "¿Quieres continuar con la conversación?",
-        spokenText: String = "Aquí estoy atento para acompañarte en lo que necesites. ¿Quieres continuar con nuestra charla en este momento?",
-        confirmOption: DecisionOption = DecisionOption("Sí", "Seguir hablando con tu asistente"),
-        dismissOption: DecisionOption = DecisionOption("No", "Terminar la conversación por ahora")
-    ) {
-        activeChatJob?.cancel()
-        stopMediaPlayerAndTts()
-        audioEngine.cancelListening()
-        _lastSpokenText.value = spokenText
-        _isPaused.value = startsPaused()
-        audioEngine.speak(spokenText)
-        transitionToState(
-            UiState.AwaitingDecision(
-                question = question,
-                spokenText = spokenText,
-                confirmOption = confirmOption,
-                dismissOption = dismissOption
-            )
-        )
-    }
-
-    fun showEmergencyState() {
-        activeChatJob?.cancel()
-        stopMediaPlayerAndTts()
-        audioEngine.cancelListening()
-        _lastSpokenText.value = UiState.EMERGENCY_SPOKEN_TEXT
-        _isPaused.value = startsPaused()
-        transitionToState(UiState.Emergency())
-        audioEngine.speak(UiState.EMERGENCY_SPOKEN_TEXT)
-    }
-
-    fun showRepairState(message: String = UiState.DEFAULT_REPAIR_MESSAGE) {
-        activeChatJob?.cancel()
-        stopMediaPlayerAndTts()
-        audioEngine.cancelListening()
-        _lastSpokenText.value = message
-        _isPaused.value = startsPaused()
-        transitionToState(UiState.Repair(message = message))
-        audioEngine.speak(message)
-    }
-
-    // =========================================================================
-    // 6. RESPALDO LOCAL DE CONTINGENCIA CON ESQUEMA MULTIMODAL C.A.R.E.
+    // 5. RESPALDO LOCAL DE CONTINGENCIA CON ESQUEMA MULTIMODAL C.A.R.E.
     // =========================================================================
 
     private fun generateLocalFallbackChatData(userInput: String): ChatData {
