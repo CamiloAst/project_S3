@@ -46,7 +46,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import uq.seminario.projects3.avatar.AssistantAvatar
 import uq.seminario.projects3.ui.components.AppNavigationHeader
+import uq.seminario.projects3.ui.components.AssistantAvatarBadge
+import uq.seminario.projects3.ui.components.AvatarCornerBadge
 import uq.seminario.projects3.ui.components.BasicControlsBar
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.CardSurface
@@ -73,6 +76,7 @@ fun EmergencyScreen(
     onSpeakClick: () -> Unit,
     onHomeClick: () -> Unit,
     modifier: Modifier = Modifier,
+    avatar: AssistantAvatar = AssistantAvatar.DEFAULT,
     isPaused: Boolean = false,
     onBackClick: () -> Unit = onHomeClick,
     onTogglePause: () -> Unit = {},
@@ -114,25 +118,25 @@ fun EmergencyScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(106.dp)
-                            .clip(CircleShape)
-                            .background(EmergencySurface)
-                            .semantics {
-                                contentDescription = "Icono de alerta"
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Warning,
-                            contentDescription = null,
-                            tint = EmergencyRed,
-                            modifier = Modifier.size(60.dp)
-                        )
-                    }
+                    // El acompañante da el aviso: borde, ondas y distintivo de alerta en rojo
+                    AssistantAvatarBadge(
+                        avatar = avatar,
+                        avatarSize = 112.dp,
+                        isSpeaking = !isPaused,
+                        waveColor = EmergencyRed,
+                        borderColor = EmergencyRed,
+                        contentDescription = "Alerta. ${avatar.title} te pide buscar ayuda",
+                        badge = {
+                            AvatarCornerBadge(
+                                icon = Icons.Default.Warning,
+                                iconTint = EmergencyRed,
+                                backgroundColor = EmergencySurface,
+                                size = 48.dp
+                            )
+                        }
+                    )
 
-                    Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Text(
                         text = "Posible emergencia",

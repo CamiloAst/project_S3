@@ -45,7 +45,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import uq.seminario.projects3.avatar.AssistantAvatar
 import uq.seminario.projects3.ui.components.AppNavigationHeader
+import uq.seminario.projects3.ui.components.AssistantAvatarBadge
 import uq.seminario.projects3.ui.theme.ActionDarkBlue
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.DarkText
@@ -59,6 +61,7 @@ import uq.seminario.projects3.ui.theme.SereneWarmBackground
  *
  * Aplica los principios de accesibilidad gerontológica y el diseño original de los mockups:
  * - Barra superior `AppNavigationHeader` con "← Atrás" e "🏠 Inicio".
+ * - Avatar del acompañante que hace la pregunta (ondas mientras la lee en voz alta).
  * - Pregunta grande, directa y visible (>=28sp).
  * - Dos botones rectangulares masivos con alto contraste ("Sí" y "No").
  * - Principio de Equivalencia: Botón inferior "Responder hablando".
@@ -74,6 +77,8 @@ fun DecisionScreen(
     onNoClick: () -> Unit,
     onVoiceResponseClick: () -> Unit,
     modifier: Modifier = Modifier,
+    avatar: AssistantAvatar = AssistantAvatar.DEFAULT,
+    isAvatarSpeaking: Boolean = false,
     userEmotion: String = "NEUTRA",
     onBackClick: () -> Unit = {},
     onHomeClick: () -> Unit = {}
@@ -116,7 +121,16 @@ fun DecisionScreen(
                     onHomeClick = onHomeClick
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                AssistantAvatarBadge(
+                    avatar = avatar,
+                    avatarSize = 88.dp,
+                    isSpeaking = isAvatarSpeaking,
+                    contentDescription = if (isAvatarSpeaking) {
+                        "${avatar.title} te está preguntando en voz alta"
+                    } else {
+                        "${avatar.title} espera tu respuesta"
+                    }
+                )
 
                 DecisionTitleSection(question = question)
             }

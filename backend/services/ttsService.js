@@ -4,7 +4,8 @@
  * Servicio de Síntesis de Voz Neural Gratuita (Microsoft Edge Neural TTS)
  * con Modulación Afectiva Gerontológica y Reloj Maestro de Sincronía.
  *
- * - Voz principal: es-CO-SalomeNeural (femenina cálida y clara) o es-MX-DaliaNeural.
+ * - Una voz por acompañante elegido en la app: compañera (es-CO-SalomeNeural, o es-MX-DaliaNeural
+ *   si falla) y compañero (es-CO-GonzaloNeural, o es-MX-JorgeNeural).
  * - Modulación afectiva de prosodia (rate y pitch) según user_emotion.
  * - Timeout fail-fast (< 2000 ms): si falla la red o el servicio, retorna
  *   audio_base64: null de inmediato para que Android active su TTS local.
@@ -12,8 +13,19 @@
 
 const { MsEdgeTTS, OUTPUT_FORMAT } = require("msedge-tts");
 
-const PRIMARY_VOICE = process.env.EDGE_TTS_VOICE || "es-CO-SalomeNeural";
-const FALLBACK_VOICE = "es-MX-DaliaNeural";
+// Voces por acompañante. EDGE_TTS_VOICE / EDGE_TTS_VOICE_MALE permiten cambiar la principal.
+const VOICE_PROFILES = {
+  female: {
+    primary: process.env.EDGE_TTS_VOICE || "es-CO-SalomeNeural",
+    fallback: "es-MX-DaliaNeural"
+  },
+  male: {
+    primary: process.env.EDGE_TTS_VOICE_MALE || "es-CO-GonzaloNeural",
+    fallback: "es-MX-JorgeNeural"
+  }
+};
+// Sin acompañante (apps anteriores) o con un valor desconocido se usa la voz femenina
+const DEFAULT_COMPANION = "female";
 // EDGE_TTS_ENABLED=false desactiva la voz neural (pruebas automáticas o desarrollo sin red):
 // las respuestas llegan con audio_base64=null y la app usa su TTS local.
 const EDGE_TTS_ENABLED = process.env.EDGE_TTS_ENABLED !== "false";
@@ -54,10 +66,19 @@ const AFFECTIVE_PROSODY_MAP = {
 const MAX_AUDIO_CACHE_ENTRIES = 40;
 const audioCache = new Map();
 
-// Instancia reutilizable precalentada para minimizar el handshake WebSocket
-let sharedTtsClient = null;
-let sharedClientReadyPromise = null;
-let currentVoiceName = PRIMARY_VOICE;
+// Un cliente reutilizable y precalentado por acompañante (minimiza el handshake WebSocket):
+// companion -> { voiceName, readyPromise }
+const ttsClients = new Map();
+
+/** Normaliza el acompañante recibido de la app: "female" o "male" (por defecto "female"). */
+function resolveCompanion(companion) {
+  return Object.hasOwn(VOICE_PROFILES, companion) ? companion : DEFAULT_COMPANION;
+}
+
+/** Voz que suena para un acompañante (la alternativa si la principal falló al conectar). */
+function voiceNameFor(companion) {
+  return ttsClients.get(companion)?.voiceName || VOICE_PROFILES[companion].primary;
+}
 
 /**
  * Obtiene la configuración de prosodia (rate y pitch) para una emoción dada.
@@ -113,37 +134,39 @@ function calculateAudioDurationMs(spokenText, audioBuffer = null, rateStr = "-12
 }
 
 /**
- * Inicializa o recupera el cliente compartido de MsEdgeTTS.
+ * Recupera (o crea) el cliente MsEdgeTTS del acompañante. Si la voz principal no conecta,
+ * se intenta una vez con la alternativa del mismo acompañante.
  */
-async function ensureTtsClient(voiceName = currentVoiceName) {
-  if (sharedTtsClient && sharedClientReadyPromise && voiceName === currentVoiceName) {
-    return sharedClientReadyPromise;
-  }
+function getTtsEntry(companion) {
+  const existing = ttsClients.get(companion);
+  if (existing) return existing;
 
-  currentVoiceName = voiceName;
+  const profile = VOICE_PROFILES[companion];
   const client = new MsEdgeTTS({
     enableLogger: false,
     connectionTimeoutMs: TTS_CONNECTION_TIMEOUT_MS,
     synthesisTimeoutMs: TTS_FAILFAST_FIRST_BYTE_MS
   });
-  sharedTtsClient = client;
+  const entry = { voiceName: profile.primary, readyPromise: null };
 
-  sharedClientReadyPromise = client
-    .setMetadata(voiceName, TTS_FORMAT)
+  entry.readyPromise = client
+    .setMetadata(profile.primary, TTS_FORMAT)
     .then(() => client)
     .catch(async (err) => {
-      if (voiceName !== FALLBACK_VOICE) {
-        console.warn(`⚠️  [EdgeTTS] Reintentando con voz alternativa ${FALLBACK_VOICE}: ${err.message}`);
-        currentVoiceName = FALLBACK_VOICE;
-        await client.setMetadata(FALLBACK_VOICE, TTS_FORMAT);
-        return client;
-      }
-      sharedTtsClient = null;
-      sharedClientReadyPromise = null;
-      throw err;
+      console.warn(`⚠️  [EdgeTTS] Reintentando con voz alternativa ${profile.fallback}: ${err.message}`);
+      entry.voiceName = profile.fallback;
+      await client.setMetadata(profile.fallback, TTS_FORMAT);
+      return client;
     });
+  ttsClients.set(companion, entry);
+  return entry;
+}
 
-  return sharedClientReadyPromise;
+/** Descarta un cliente fallido; la siguiente síntesis abre uno nuevo. */
+function dropTtsEntry(companion, entry) {
+  if (ttsClients.get(companion) === entry) {
+    ttsClients.delete(companion);
+  }
 }
 
 /**
@@ -151,7 +174,8 @@ async function ensureTtsClient(voiceName = currentVoiceName) {
  * Aplica un watchdog fail-fast (< 2 segundos) hasta recibir el primer paquete de audio:
  * si no hay respuesta o falla la red, rechaza en < 1.9s para activar el fallback TTS en Android.
  */
-async function synthesizeBufferOnce(spokenText, prosody) {
+async function synthesizeBufferOnce(spokenText, prosody, companion) {
+  const entry = getTtsEntry(companion);
   let firstChunkTimer = null;
   let totalStreamTimer = null;
 
@@ -176,8 +200,7 @@ async function synthesizeBufferOnce(spokenText, prosody) {
           audioStream.destroy();
         } catch (_) {}
       }
-      sharedTtsClient = null;
-      sharedClientReadyPromise = null;
+      dropTtsEntry(companion, entry);
       reject(err);
     };
 
@@ -190,7 +213,7 @@ async function synthesizeBufferOnce(spokenText, prosody) {
       );
     }, TTS_CONNECTION_TIMEOUT_MS);
 
-    ensureTtsClient(currentVoiceName)
+    entry.readyPromise
       .then((client) => {
         if (settled) return;
         if (firstChunkTimer) {
@@ -237,6 +260,7 @@ async function synthesizeBufferOnce(spokenText, prosody) {
           cleanupTimers();
           const fullBuffer = Buffer.concat(chunks);
           if (fullBuffer.length === 0) {
+            dropTtsEntry(companion, entry);
             return reject(new Error("El stream de Edge TTS finalizó sin bytes de audio."));
           }
           resolve(fullBuffer);
@@ -250,6 +274,7 @@ async function synthesizeBufferOnce(spokenText, prosody) {
           if (fullBuffer.length > 0) {
             resolve(fullBuffer);
           } else {
+            dropTtsEntry(companion, entry);
             reject(new Error("El stream de Edge TTS se cerró sin datos."));
           }
         });
@@ -264,14 +289,15 @@ async function synthesizeBufferOnce(spokenText, prosody) {
   });
 }
 
-function audioCacheKey(trimmedText, userEmotion) {
-  return `${currentVoiceName}|${userEmotion}|${trimmedText}`;
+// La clave incluye el acompañante: el mismo texto suena con voz distinta para cada uno
+function audioCacheKey(trimmedText, userEmotion, companion) {
+  return `${companion}|${userEmotion}|${trimmedText}`;
 }
 
 /** true si el audio de este texto ya está en caché (se entrega sin latencia de red). */
-function hasCachedAudio(spokenText, userEmotion = "NEUTRA") {
+function hasCachedAudio(spokenText, userEmotion = "NEUTRA", companion = DEFAULT_COMPANION) {
   if (!EDGE_TTS_ENABLED || !spokenText || typeof spokenText !== "string") return false;
-  return audioCache.has(audioCacheKey(spokenText.trim(), userEmotion));
+  return audioCache.has(audioCacheKey(spokenText.trim(), userEmotion, resolveCompanion(companion)));
 }
 
 /**
@@ -281,9 +307,11 @@ function hasCachedAudio(spokenText, userEmotion = "NEUTRA") {
  *
  * @param {string} spokenText Texto que pronunciará el asistente.
  * @param {string} userEmotion Emoción detectada (POSITIVA, NEGATIVA_TRISTEZA_SOLEDAD, etc.).
+ * @param {string} companion Acompañante elegido en la app ("female" | "male").
  * @returns {Promise<{ audio_base64: string | null, audio_duration_ms: number, voice: string, prosody: { rate: string, pitch: string } }>}
  */
-async function synthesizeSpeechWithEmotion(spokenText, userEmotion = "NEUTRA") {
+async function synthesizeSpeechWithEmotion(spokenText, userEmotion = "NEUTRA", companion = DEFAULT_COMPANION) {
+  const voiceCompanion = resolveCompanion(companion);
   const prosody = getProsodyForEmotion(userEmotion);
   const fallbackDurationMs = calculateAudioDurationMs(spokenText, null, prosody.rate);
 
@@ -291,20 +319,20 @@ async function synthesizeSpeechWithEmotion(spokenText, userEmotion = "NEUTRA") {
     return {
       audio_base64: null,
       audio_duration_ms: fallbackDurationMs,
-      voice: currentVoiceName,
+      voice: voiceNameFor(voiceCompanion),
       prosody
     };
   }
 
   const trimmedText = spokenText.trim();
-  const cacheKey = audioCacheKey(trimmedText, userEmotion);
+  const cacheKey = audioCacheKey(trimmedText, userEmotion, voiceCompanion);
 
   if (audioCache.has(cacheKey)) {
     const cached = audioCache.get(cacheKey);
     return {
       audio_base64: cached.audio_base64,
       audio_duration_ms: cached.audio_duration_ms,
-      voice: currentVoiceName,
+      voice: voiceNameFor(voiceCompanion),
       prosody
     };
   }
@@ -312,14 +340,14 @@ async function synthesizeSpeechWithEmotion(spokenText, userEmotion = "NEUTRA") {
   const startTime = Date.now();
 
   try {
-    const mp3Buffer = await synthesizeBufferOnce(trimmedText, prosody);
+    const mp3Buffer = await synthesizeBufferOnce(trimmedText, prosody, voiceCompanion);
 
     const audioBase64 = mp3Buffer.toString("base64");
     const durationMs = calculateAudioDurationMs(trimmedText, mp3Buffer, prosody.rate);
     const elapsedMs = Date.now() - startTime;
 
     console.log(
-      `🎙️  [Neural TTS] Voz=${currentVoiceName} | Emoción=${userEmotion} (rate=${prosody.rate}, pitch=${prosody.pitch}) | ` +
+      `🎙️  [Neural TTS] Voz=${voiceNameFor(voiceCompanion)} | Emoción=${userEmotion} (rate=${prosody.rate}, pitch=${prosody.pitch}) | ` +
         `Duración=${durationMs}ms | Generado en ${elapsedMs}ms (${mp3Buffer.length} bytes)`
     );
 
@@ -335,7 +363,7 @@ async function synthesizeSpeechWithEmotion(spokenText, userEmotion = "NEUTRA") {
     return {
       audio_base64: audioBase64,
       audio_duration_ms: durationMs,
-      voice: currentVoiceName,
+      voice: voiceNameFor(voiceCompanion),
       prosody
     };
   } catch (err) {
@@ -344,28 +372,33 @@ async function synthesizeSpeechWithEmotion(spokenText, userEmotion = "NEUTRA") {
       `⚠️  [Neural TTS Fallback] No se pudo generar audio neural tras ${elapsedMs}ms (${err.message}). ` +
         `Devolviendo audio_base64: null para respaldo TTS local en Android.`
     );
-    sharedTtsClient = null;
-    sharedClientReadyPromise = null;
 
     return {
       audio_base64: null,
       audio_duration_ms: fallbackDurationMs,
-      voice: currentVoiceName,
+      voice: voiceNameFor(voiceCompanion),
       prosody
     };
   }
 }
 
-// Precalentar conexión WebSocket en segundo plano al cargar el servicio (sin bloquear el arranque)
+// Precalentar en segundo plano la conexión de cada acompañante (sin bloquear el arranque)
 if (EDGE_TTS_ENABLED) {
-  ensureTtsClient(PRIMARY_VOICE).catch((err) => {
-    console.warn(`ℹ️  [Neural TTS Init] Precalentamiento diferido (${err.message}). Se conectará bajo demanda.`);
-  });
+  for (const companion of Object.keys(VOICE_PROFILES)) {
+    const entry = getTtsEntry(companion);
+    entry.readyPromise.catch((err) => {
+      dropTtsEntry(companion, entry);
+      console.warn(
+        `ℹ️  [Neural TTS Init] Precalentamiento diferido de la voz "${companion}" (${err.message}). Se conectará bajo demanda.`
+      );
+    });
+  }
 }
 
 module.exports = {
-  PRIMARY_VOICE,
-  FALLBACK_VOICE,
+  VOICE_PROFILES,
+  DEFAULT_COMPANION,
+  resolveCompanion,
   AFFECTIVE_PROSODY_MAP,
   getProsodyForEmotion,
   calculateAudioDurationMs,

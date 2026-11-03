@@ -97,10 +97,12 @@ Si `API_ACCESS_TOKEN` está definido (obligatorio en producción), todas las rut
 
 #### Request Body
 `sessionId` es **obligatorio** (1-128 caracteres: letras, números, `_`, `-`, `.` o `:`). La app Android envía un identificador único por instalación; si falta, la API responde `400`.
+`companion` es **opcional**: el acompañante elegido en la app, `"female"` (compañera, voz `es-CO-SalomeNeural`) o `"male"` (compañero, voz `es-CO-GonzaloNeural`). Fija la voz neural y el género con el que el asistente habla de sí. Si falta o no es válido se usa `"female"`.
 ```json
 {
   "message": "Me siento muy solo hoy, mis hijos no me han llamado",
-  "sessionId": "elderly_user_123"
+  "sessionId": "elderly_user_123",
+  "companion": "female"
 }
 ```
 
@@ -128,7 +130,7 @@ Si `API_ACCESS_TOKEN` está definido (obligatorio en producción), todas las rut
 | `screen_text` | `string` | **Pantalla** | Resumen o título complementario corto (**4 a 7 palabras**, nunca copia literal de `spoken_text`). |
 | `user_emotion` | `string` | **Emoción / Prosodia** | Categoría emocional clasificada por Gemini (o por el detector de respaldo): `POSITIVA`, `NEGATIVA_TRISTEZA_SOLEDAD`, `NEGATIVA_ANSIEDAD_PREOCUPACION`, `NEUTRA`, `AMBIGUA`. Modula la prosodia del TTS y la UI en Android. |
 | `suggested_action` | `string` | **Control UI** | `continue` (charla normal), `show_decision_buttons` (botones accesibles Sí/No), `clarify` (pedir aclaración amable), `emergency_alert` (pantalla de alerta de posible emergencia; sin llamadas ni avisos en el ambiente de pruebas). |
-| `audio_base64` | `string \| null` | **Audio Neural** | MP3 (24 kHz, 48 kbps mono) codificado en Base64 generado con `msedge-tts` (`es-CO-SalomeNeural`), o `null` si aplica fallback al TTS local de Android. |
+| `audio_base64` | `string \| null` | **Audio Neural** | MP3 (24 kHz, 48 kbps mono) codificado en Base64 generado con `msedge-tts` (voz según `companion`), o `null` si aplica fallback al TTS local de Android. |
 | `audio_duration_ms` | `number` | **Reloj Maestro** | Duración estimada/exacta del audio en milisegundos para sincronizar la interfaz. |
 
 En la raíz de la respuesta también se incluye `source` (`"gemini"`, `"fallback_bank"` o `"emergency_guardrail"`) y, cuando aplica el banco por fallo de red/API, `fallback_reason` (`"timeout"`, `"quota_exceeded"`, `"service_unavailable"`, etc.).

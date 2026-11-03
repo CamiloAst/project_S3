@@ -219,3 +219,26 @@ test("no se reintenta si no queda plazo para otro intento", async () => {
   await assert.rejects(withGeminiRetries(attempt, Date.now() + 1000, { maxRetries: 2, sleep: noWait }));
   assert.equal(attempt.calls, 1);
 });
+
+test("el prompt indica el género del acompañante elegido (femenino por defecto)", () => {
+  assert.match(buildTurnPrompt("hola"), /tu compañera.*"estoy lista"/);
+  assert.match(buildTurnPrompt("hola", [], "", "female"), /tu compañera/);
+  assert.match(buildTurnPrompt("hola", [], "", "male"), /tu compañero.*"estoy listo"/);
+  assert.match(buildTurnPrompt("hola", [], "", "robot"), /tu compañera/);
+});
+
+test("companion es opcional y un valor desconocido no rompe la petición", async () => {
+  for (const companion of [undefined, "female", "male", "robot", 42]) {
+    const { status, body } = await callChat({ message: "buenas tardes", sessionId: "s_companion", companion });
+    assert.equal(status, 200, `companion=${companion}`);
+    assert.equal(body.data.audio_base64, null);
+  }
+});
+
+test("el banco no usa género cuando el asistente habla de sí", () => {
+  for (const variations of Object.values(RESPONSE_VARIATIONS_BANK)) {
+    for (const { spoken_text, screen_text } of variations) {
+      assert.doesNotMatch(`${spoken_text} ${screen_text}`, /\b(list[oa]|atent[oa])\b/i, spoken_text);
+    }
+  }
+});

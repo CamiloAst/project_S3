@@ -19,9 +19,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Spa
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -47,7 +45,9 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import uq.seminario.projects3.avatar.AssistantAvatar
 import uq.seminario.projects3.ui.components.AppNavigationHeader
+import uq.seminario.projects3.ui.components.AssistantAvatarBadge
 import uq.seminario.projects3.ui.components.BasicControlsBar
 import uq.seminario.projects3.ui.theme.DarkText
 import uq.seminario.projects3.ui.theme.MutedDarkText
@@ -67,6 +67,7 @@ private const val DEFAULT_RECOMMENDATION_SUBTITLE = "Inhala despacio y exhala su
  *
  * Modelo CARE: Complementariedad (voz + resumen visual) y Equivalencia (responder por voz o con botones):
  * - Barra superior `AppNavigationHeader` con "← Atrás" e "🏠 Inicio".
+ * - El avatar del acompañante muestra ondas mientras habla.
  * - Muestra el apoyo visual corto (`screenText`) junto a la tarjeta de recomendación de bienestar.
  * - Footer limpio con "Pausar lectura / Continuar lectura" (y "Repetir") + botón "Hablar".
  */
@@ -76,6 +77,7 @@ fun RecommendationScreen(
     isPaused: Boolean,
     onTogglePause: () -> Unit,
     modifier: Modifier = Modifier,
+    avatar: AssistantAvatar = AssistantAvatar.DEFAULT,
     recommendationTitle: String = DEFAULT_RECOMMENDATION_TITLE,
     recommendationSubtitle: String = DEFAULT_RECOMMENDATION_SUBTITLE,
     onRepeatClick: () -> Unit = {},
@@ -127,7 +129,7 @@ fun RecommendationScreen(
                     )
                     Spacer(modifier = Modifier.width(10.dp))
                     Text(
-                        text = "Tu asistente te acompaña",
+                        text = "${avatar.title} te acompaña",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontSize = 23.sp,
                             fontWeight = FontWeight.SemiBold,
@@ -153,33 +155,19 @@ fun RecommendationScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Box(
-                        modifier = Modifier
-                            .size(76.dp)
-                            .clip(CircleShape)
-                            .background(SereneWarmCardSurface)
-                            .semantics {
-                                contentDescription = if (!isPaused) {
-                                    "El asistente te acompaña hablando en voz alta"
-                                } else {
-                                    "La voz del asistente está en pausa"
-                                }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (!isPaused) {
-                                Icons.AutoMirrored.Filled.VolumeUp
-                            } else {
-                                Icons.Default.RecordVoiceOver
-                            },
-                            contentDescription = null,
-                            tint = SereneCalmAccent,
-                            modifier = Modifier.size(42.dp)
-                        )
-                    }
+                    AssistantAvatarBadge(
+                        avatar = avatar,
+                        avatarSize = 112.dp,
+                        isSpeaking = !isPaused,
+                        borderColor = SereneWarmCardSurface,
+                        contentDescription = if (!isPaused) {
+                            "${avatar.title} te acompaña hablando en voz alta"
+                        } else {
+                            "La voz de ${avatar.title.lowercase()} está en pausa"
+                        }
+                    )
 
-                    Spacer(modifier = Modifier.height(18.dp))
+                    Spacer(modifier = Modifier.height(10.dp))
 
                     Card(
                         modifier = Modifier.fillMaxWidth(),
