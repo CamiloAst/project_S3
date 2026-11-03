@@ -1,6 +1,6 @@
 {
   "name": "geriatric-companion-ai-backend",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "API RESTful backend con Express.js y Google Gemini para el chatbot de acompañamiento emocional en adultos mayores (Modelo CARE).",
   "main": "server.js",
   "scripts": {
@@ -16,7 +16,7 @@
     "android",
     "emotional-support"
   ],
-  "author": "Senior Backend & AI Architect",
+  "author": "Juan Camilo Astudillo",
   "license": "MIT",
   "dependencies": {
     "@google/genai": "^2.32.0",

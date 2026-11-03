@@ -16,3 +16,6 @@ local.properties
 node_modules/
 .env
 
+
+# Selección de dispositivo de Android Studio (local de cada equipo)
+/.idea/deploymentTargetSelector.xml

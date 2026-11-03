@@ -24,6 +24,8 @@ const {
   isTokenRequired
 } = require("./middleware/security");
 
+const { version: SERVICE_VERSION } = require("./package.json");
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -70,7 +72,7 @@ const healthHandler = (req, res) => {
   res.status(200).json({
     status: "ok",
     service: "Geriatric Companion AI Backend",
-    version: "1.1.0",
+    version: SERVICE_VERSION,
     uptimeSeconds: Math.floor(process.uptime()),
     timestamp: new Date().toISOString(),
     sessionStore: sessionStore.kind,

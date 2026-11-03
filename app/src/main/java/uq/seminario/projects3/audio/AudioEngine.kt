@@ -41,6 +41,8 @@ class AudioEngine(
 
         /** Código propio (no es de SpeechRecognizer): el dispositivo no tiene servicio de reconocimiento. */
         const val ERROR_RECOGNITION_UNAVAILABLE = -100
+
+        private const val DEFAULT_RECOGNITION_LANGUAGE = "es-CO"
     }
 
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -177,8 +179,9 @@ class AudioEngine(
 
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "es-ES")
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "es-ES")
+                    val language = recognitionLanguageTag()
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, language)
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, language)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3)
 
                     // Tolerancia ampliada a pausas naturales y ritmo pausado de adultos mayores
@@ -201,6 +204,22 @@ class AudioEngine(
                 Log.e("AudioEngine", "Error al iniciar STT", e)
                 onSpeechError(SpeechRecognizer.ERROR_CLIENT)
             }
+        }
+    }
+
+    /**
+     * Variante de español para el reconocimiento: la del teléfono si ya está en español
+     * (es-CO, es-MX, ...) y, si no, español de Colombia, público objetivo de la app.
+     */
+    private fun recognitionLanguageTag(): String {
+        val deviceLocale = Locale.getDefault()
+        // Solo idioma + país de dos letras (es-CO, es-MX): se descartan regiones numéricas
+        // como es-419 y extensiones (-u-nu-latn) que algunos reconocedores no admiten
+        val country = deviceLocale.country
+        return if (deviceLocale.language == "es" && country.length == 2 && country.all { it.isLetter() }) {
+            "es-$country"
+        } else {
+            DEFAULT_RECOGNITION_LANGUAGE
         }
     }
 

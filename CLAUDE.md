@@ -84,5 +84,8 @@ Response `data` fields: `spoken_text`, `screen_text`, `user_emotion` (`POSITIVA`
 ### Sessions
 `sessionId` is required by the backend (400 if missing; regex `^[\w\-.:]+$`, max 128). The app generates one per install in `session/SessionIdProvider.kt` (`android_<UUID>` in SharedPreferences `care_session`, excluded from backups in `res/xml/backup_rules.xml` and `data_extraction_rules.xml`). Never reintroduce a shared default session id.
 
+### Lifecycle
+`ChatbotApp` observes the lifecycle: ON_STOP (ignored during configuration changes) calls `onAppBackgrounded()`, which cancels listening and pauses audio; ON_START calls `onAppForegrounded()` and re-reads the mic permission. While in background, async responses start paused (`startsPaused()`, `speakIfForeground()`); only `emergency_alert` plays anyway (`playInBackground = true`).
+
 ### UI navigation
 `ChatbotViewModel` keeps its own back stack (`stateHistory: ArrayDeque<UiState>`); `ChatbotApp.kt` renders one screen per `UiState` inside `AnimatedContent` and wires `BackHandler` to `navigateBack()`. `UiState` is a sealed interface, so adding a state requires handling it in `ChatbotApp`'s `when`, `onMicClicked`, `navigateBack` and `resolveCurrentSpokenText`. The bottom `DemoStateSwitcherBar` in `ChatbotApp.kt` is a test-mode tool that forces each state (including Emergency).

@@ -129,6 +129,9 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
 
     private var localFallbackCounter = 0
 
+    // false mientras la app está en segundo plano: las respuestas que lleguen no suenan solas
+    private var isAppInForeground = true
+
     // --- Reproductor de Voz Neural (MediaPlayer) y Reloj Maestro de Sincronía ---
     private var mediaPlayer: MediaPlayer? = null
     private var isNeuralAudioActive: Boolean = false
@@ -176,12 +179,17 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
      * Decodifica el audio neural en Base64 a un archivo temporal .mp3 en context.cacheDir
      * y lo reproduce inmediatamente con MediaPlayer. Si falla, recurre al TTS nativo mejorado.
      */
-    private fun playNeuralAudioOrFallback(audioBase64: String?, spokenText: String) {
+    private fun playNeuralAudioOrFallback(
+        audioBase64: String?,
+        spokenText: String,
+        playInBackground: Boolean = false
+    ) {
         stopMediaPlayerAndTts()
+        val speakNow: (String) -> Unit = if (playInBackground) audioEngine::speak else ::speakIfForeground
 
         if (audioBase64.isNullOrBlank()) {
             isNeuralAudioActive = false
-            audioEngine.speak(spokenText)
+            speakNow(spokenText)
             return
         }
 
@@ -211,7 +219,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                 setOnErrorListener { failedPlayer, what, extra ->
                     Log.w(TAG, "Error en MediaPlayer neural (what=$what, extra=$extra). Activando TTS local.")
                     releasePlayer(failedPlayer)
-                    audioEngine.speak(spokenText)
+                    speakNow(spokenText)
                     true
                 }
                 prepare()
@@ -222,13 +230,23 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                 _lastAudioDurationMs.value = player.duration.toLong()
             }
 
-            if (!_isVoiceMuted.value) {
+            if (!_isVoiceMuted.value && (isAppInForeground || playInBackground)) {
                 startNeuralPlayback(player)
             }
         } catch (e: Exception) {
             Log.w(TAG, "Fallo al reproducir voz neural MP3 (${e.message}). Usando TTS local de respaldo.")
             mediaPlayer?.let { releasePlayer(it) }
-            audioEngine.speak(spokenText)
+            speakNow(spokenText)
+        }
+    }
+
+    /** Una respuesta nueva empieza en pausa si el usuario silenció la voz o salió de la app. */
+    private fun startsPaused(): Boolean = _isVoiceMuted.value || !isAppInForeground
+
+    /** TTS local para respuestas asíncronas: en segundo plano no se lee (queda en "Continuar lectura"). */
+    private fun speakIfForeground(text: String) {
+        if (isAppInForeground) {
+            audioEngine.speak(text)
         }
     }
 
@@ -444,9 +462,10 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
             val emergencySpoken = data.spoken_text.ifBlank { UiState.EMERGENCY_SPOKEN_TEXT }
             val emergencyScreen = data.screen_text.ifBlank { UiState.EMERGENCY_SCREEN_TEXT }
             _lastSpokenText.value = emergencySpoken
+            // Excepción al silencio en segundo plano: una posible emergencia se lee igualmente
             _isPaused.value = _isVoiceMuted.value
             audioEngine.triggerHapticFeedback()
-            playNeuralAudioOrFallback(data.audio_base64, emergencySpoken)
+            playNeuralAudioOrFallback(data.audio_base64, emergencySpoken, playInBackground = true)
             transitionToState(
                 UiState.Emergency(screenText = emergencyScreen, spokenText = emergencySpoken)
             )
@@ -457,7 +476,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
             val repairMessage = UiState.DEFAULT_REPAIR_MESSAGE
             val spokenHelp = data.spoken_text.ifBlank { repairMessage }
             _lastSpokenText.value = spokenHelp
-            _isPaused.value = _isVoiceMuted.value
+            _isPaused.value = startsPaused()
             playNeuralAudioOrFallback(data.audio_base64, spokenHelp)
             transitionToState(UiState.Repair(message = repairMessage))
             return
@@ -476,7 +495,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         }
         val screenText = data.screen_text.ifBlank { defaultScreenText }
 
-        val pausedState = _isVoiceMuted.value
+        val pausedState = startsPaused()
         _isPaused.value = pausedState
 
         // A) Iniciar inmediatamente voz neural con MediaPlayer (si audio_base64 != null) o TTS de respaldo
@@ -521,9 +540,9 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
             UiState.DEFAULT_REPAIR_HINT
         }
         _lastSpokenText.value = repairMessage
-        _isPaused.value = _isVoiceMuted.value
+        _isPaused.value = startsPaused()
         transitionToState(UiState.Repair(message = repairMessage, hint = repairHint))
-        audioEngine.speak(repairMessage)
+        speakIfForeground(repairMessage)
     }
 
     private fun handleTtsPlaybackFinished() {
@@ -579,24 +598,47 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                 audioEngine.speak(textToSpeak)
             }
         } else {
-            // Pausar lectura: mediaPlayer.pause() y actualiza el estado a pausado
-            val player = mediaPlayer
-            if (isNeuralAudioActive && player != null) {
-                try {
-                    if (player.isPlaying) {
-                        player.pause()
-                    }
-                } catch (e: Exception) {
-                    Log.w(TAG, "Error al pausar MediaPlayer", e)
+            pauseReading()
+        }
+    }
+
+    /** Pausa el audio neural o el TTS y marca la lectura como pausada (sin vibración). */
+    private fun pauseReading() {
+        val player = mediaPlayer
+        if (isNeuralAudioActive && player != null) {
+            try {
+                if (player.isPlaying) {
+                    player.pause()
                 }
-            }
-            audioEngine.stopSpeaking()
-            _isPaused.value = true
-            val current = _uiState.value
-            if (current is UiState.Speaking) {
-                _uiState.value = current.copy(isPaused = true)
+            } catch (e: Exception) {
+                Log.w(TAG, "Error al pausar MediaPlayer", e)
             }
         }
+        audioEngine.stopSpeaking()
+        _isPaused.value = true
+        val current = _uiState.value
+        if (current is UiState.Speaking) {
+            _uiState.value = current.copy(isPaused = true)
+        }
+    }
+
+    // =========================================================================
+    // CICLO DE VIDA: la app no habla ni escucha mientras no está visible
+    // =========================================================================
+
+    /** ON_STOP: pausa la lectura y cancela el micrófono para no hablar ni escuchar a escondidas. */
+    fun onAppBackgrounded() {
+        isAppInForeground = false
+        if (_uiState.value is UiState.Listening) {
+            audioEngine.cancelListening()
+            _uiState.value = stateHistory.removeLastOrNull() ?: UiState.Idle
+        }
+        pauseReading()
+    }
+
+    /** ON_START: no reanuda sola; el usuario continúa con "Continuar lectura" o "Repetir". */
+    fun onAppForegrounded() {
+        isAppInForeground = true
     }
 
     fun repeatLastResponse() {
@@ -740,7 +782,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         stopMediaPlayerAndTts()
         audioEngine.cancelListening()
         _lastSpokenText.value = spokenText
-        val pausedState = _isVoiceMuted.value
+        val pausedState = startsPaused()
         _isPaused.value = pausedState
         audioEngine.speak(spokenText)
         transitionToState(
@@ -763,7 +805,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         stopMediaPlayerAndTts()
         audioEngine.cancelListening()
         _lastSpokenText.value = spokenText
-        _isPaused.value = _isVoiceMuted.value
+        _isPaused.value = startsPaused()
         audioEngine.speak(spokenText)
         transitionToState(
             UiState.AwaitingDecision(
@@ -780,7 +822,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         stopMediaPlayerAndTts()
         audioEngine.cancelListening()
         _lastSpokenText.value = UiState.EMERGENCY_SPOKEN_TEXT
-        _isPaused.value = _isVoiceMuted.value
+        _isPaused.value = startsPaused()
         transitionToState(UiState.Emergency())
         audioEngine.speak(UiState.EMERGENCY_SPOKEN_TEXT)
     }
@@ -790,7 +832,7 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
         stopMediaPlayerAndTts()
         audioEngine.cancelListening()
         _lastSpokenText.value = message
-        _isPaused.value = _isVoiceMuted.value
+        _isPaused.value = startsPaused()
         transitionToState(UiState.Repair(message = message))
         audioEngine.speak(message)
     }
