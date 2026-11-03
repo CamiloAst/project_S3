@@ -10,6 +10,8 @@ Voice companion assistant for older adults (Spanish-language UI and content). Tw
 
 All user-facing text, prompts, comments and docs are written in Spanish; keep it that way.
 
+It is a university project that must stay on free tiers: do not add paid LLM providers or features that require enabling billing.
+
 ### Modelo CARE (meaning matters)
 
 CARE here is the **multimodal interaction model**, not a list of conversational virtues:
@@ -66,7 +68,8 @@ Android 17+ (local network protection, `targetSdk = 37`) silently drops connecti
 3. `backend/controllers/chatController.js` `handleChat`:
    - pre-LLM emergency check (`isCriticalRisk` from `services/emergencyDetector.js`) → short-circuits to `source: "emergency_guardrail"`;
    - otherwise Gemini with structured JSON output (`careResponseSchema`) and the system prompt `GERONTOLOGICAL_SYSTEM_PROMPT`; Gemini also classifies `user_emotion` (5 fixed categories);
-   - on any Gemini failure/timeout → keyword detector + `RESPONSE_VARIATIONS_BANK` with per-session anti-repetition (`source: "fallback_bank"`, `fallback_reason` set);
+   - Gemini 5xx errors (e.g. 503 "high demand") are first retried with exponential backoff by `withGeminiRetries` (`GEMINI_MAX_RETRIES`, default 2) within the same `GEMINI_TIMEOUT_MS` deadline; 429 (free-tier quota) and timeouts are not retried;
+   - on any remaining Gemini failure/timeout → keyword detector + `RESPONSE_VARIATIONS_BANK` with per-session anti-repetition (`source: "fallback_bank"`, `fallback_reason` set);
    - `sanitizeAndEnforceGuardrails` post-processes every answer (medical-prescription filter, screen_text length, enum validation);
    - session history persisted via `services/sessionStore.js` (`file` | `redis` | `memory`);
    - `services/ttsService.js` synthesizes MP3 with emotion-based prosody; it fails fast and returns `audio_base64: null` so the app falls back to local TTS. TTS is skipped when `elapsed + TTS_WORST_CASE_MS` would exceed `CHAT_RESPONSE_BUDGET_MS` (18 s).

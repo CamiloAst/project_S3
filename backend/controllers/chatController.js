@@ -31,6 +31,12 @@ const { isCriticalRisk } = require("../services/emergencyDetector");
 const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
 const GEMINI_MODEL = (process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL).trim();
 const GEMINI_TIMEOUT_MS = parseInt(process.env.GEMINI_TIMEOUT_MS || "8000", 10); // Timeout estricto
+// Reintentos ante saturación de Gemini (5xx, p. ej. 503 "high demand"), dentro de GEMINI_TIMEOUT_MS.
+// 0 los desactiva. Cada reintento es otra petición a la cuota gratuita: mantener el valor bajo.
+const GEMINI_MAX_RETRIES = parseInt(process.env.GEMINI_MAX_RETRIES || "2", 10);
+const GEMINI_RETRY_BASE_DELAY_MS = 500;
+// Tiempo mínimo que debe quedar tras la espera para que otro intento tenga opciones de terminar
+const GEMINI_MIN_ATTEMPT_MS = 1500;
 // Límite de tokens de salida. En modelos con "thinking" los tokens de razonamiento también
 // consumen este presupuesto: un valor demasiado bajo trunca el JSON y provoca fallback.
 const GEMINI_MAX_OUTPUT_TOKENS = parseInt(process.env.GEMINI_MAX_OUTPUT_TOKENS || "1024", 10);
@@ -682,7 +688,7 @@ const aiStatus = {
   modelVerified: null,
   thinkingConfig: activeThinkingConfig || "default",
   timeoutMs: GEMINI_TIMEOUT_MS,
-  stats: { gemini: 0, fallback: 0, emergency: 0 },
+  stats: { gemini: 0, fallback: 0, emergency: 0, retries: 0 },
   lastSuccessAt: null,
   lastError: null
 };
@@ -992,6 +998,35 @@ function isThinkingConfigError(err) {
   return err?.status === 400 && /thinking/i.test(String(err?.message || ""));
 }
 
+/**
+ * Ejecuta `attempt` y lo repite con espera exponencial ante errores 5xx de Gemini mientras quede
+ * plazo hasta `deadline`. Los 429 (cuota agotada) y los timeouts no se reintentan: gastarían
+ * más cuota gratuita o un plazo que ya no existe. Agotados los reintentos se lanza el último
+ * error y el controlador pasa al banco de respaldo.
+ */
+async function withGeminiRetries(attempt, deadline, { maxRetries = GEMINI_MAX_RETRIES, sleep } = {}) {
+  const wait = sleep || ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+
+  for (let retry = 0; ; retry++) {
+    try {
+      return await attempt();
+    } catch (err) {
+      const delayMs = GEMINI_RETRY_BASE_DELAY_MS * 2 ** retry + Math.floor(Math.random() * 250);
+      const canRetry =
+        retry < maxRetries &&
+        describeGeminiError(err).kind === "service_unavailable" &&
+        deadline - Date.now() >= delayMs + GEMINI_MIN_ATTEMPT_MS;
+      if (!canRetry) throw err;
+
+      aiStatus.stats.retries++;
+      console.warn(
+        `🔁 [Gemini Retry] Intento ${retry + 1} falló (${err.status}); reintento ${retry + 1}/${maxRetries} en ${delayMs}ms`
+      );
+      await wait(delayMs);
+    }
+  }
+}
+
 function buildTurnPrompt(userMessage, recentBotResponses = []) {
   const lastThreeResponses = recentBotResponses.slice(-3);
   const antiRepetitionBlock =
@@ -1082,22 +1117,22 @@ async function callGemini(history, userMessage, recentBotResponses = []) {
   ];
   const deadline = Date.now() + GEMINI_TIMEOUT_MS;
 
-  let result;
-  try {
-    result = await generateWithDeadline(contents, deadline, activeThinkingConfig);
-  } catch (err) {
-    // Si el modelo no acepta la configuración de thinking, se desactiva y se reintenta una vez
-    if (activeThinkingConfig && isThinkingConfigError(err) && deadline - Date.now() > 500) {
-      console.error(
-        `💥 [Gemini] El modelo ${GEMINI_MODEL} rechazó thinkingConfig=${JSON.stringify(activeThinkingConfig)} ` +
-          `(${err.message}). Se usará la configuración por defecto del modelo; ajusta GEMINI_THINKING_LEVEL.`
-      );
-      activeThinkingConfig = undefined;
-      result = await generateWithDeadline(contents, deadline, undefined);
-    } else {
+  const result = await withGeminiRetries(async () => {
+    try {
+      return await generateWithDeadline(contents, deadline, activeThinkingConfig);
+    } catch (err) {
+      // Si el modelo no acepta la configuración de thinking, se desactiva y se reintenta una vez
+      if (activeThinkingConfig && isThinkingConfigError(err) && deadline - Date.now() > 500) {
+        console.error(
+          `💥 [Gemini] El modelo ${GEMINI_MODEL} rechazó thinkingConfig=${JSON.stringify(activeThinkingConfig)} ` +
+            `(${err.message}). Se usará la configuración por defecto del modelo; ajusta GEMINI_THINKING_LEVEL.`
+        );
+        activeThinkingConfig = undefined;
+        return generateWithDeadline(contents, deadline, undefined);
+      }
       throw err;
     }
-  }
+  }, deadline);
 
   return parseCareResponse(result.text, result.finishReason);
 }
@@ -1310,6 +1345,7 @@ module.exports = {
   createEmptySession,
   truncateScreenText,
   buildTurnPrompt,
+  withGeminiRetries,
   sessionStore,
   synthesizeSpeechWithEmotion,
   getProsodyForEmotion,
