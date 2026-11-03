@@ -50,6 +50,14 @@ const MAX_SESSION_ID_LENGTH = 128;
 const SESSION_ID_REGEX = /^[\w\-.:]+$/;
 const MAX_MESSAGE_LENGTH = 2000;
 
+// Las conversaciones contienen datos de salud: por defecto los logs solo muestran la longitud
+// del mensaje. LOG_USER_TEXT=true lo muestra completo (solo para depurar en local).
+const LOG_USER_TEXT = process.env.LOG_USER_TEXT === "true";
+
+function userTextForLog(text) {
+  return LOG_USER_TEXT ? `"${text}"` : `<${(text || "").length} caracteres>`;
+}
+
 // =============================================================================
 // 1. CATÁLOGO DE PALABRAS CLAVE (EMOTION_KEYWORDS_CATALOG)
 //    Solo se usa como RESPALDO cuando Gemini no responde (ver handleChat).
@@ -892,7 +900,7 @@ function sanitizeAndEnforceGuardrails(responseObj, userInput, fallbackCategory, 
 
   // 4. Si el LLM intentó recetar o indicar medicamentos, neutralizarlo
   if (containsMedicalPrescription(sanitized.spoken_text || "")) {
-    console.warn(`🩺 [Guardrail Médico] Respuesta con indicación de medicamento neutralizada: "${sanitized.spoken_text}"`);
+    console.warn(`🩺 [Guardrail Médico] Respuesta con indicación de medicamento neutralizada: ${userTextForLog(sanitized.spoken_text)}`);
     sanitized.spoken_text = "Comprendo lo que me dices sobre tus medicinas, pero recuerda que siempre debemos seguir las indicaciones exactas de tu médico de cabecera. ¿Quieres que contactemos a tu cuidador para consultarlo?";
     sanitized.screen_text = "Consulta siempre a tu médico";
     sanitized.suggested_action = "show_decision_buttons";
@@ -1122,7 +1130,7 @@ async function handleChat(req, res, next) {
     // 1. Verificación instantánea de guardrails previos al LLM (determinista, sin latencia)
     const preCheck = evaluateInputGuardrails(trimmedMessage);
     if (preCheck.triggered) {
-      console.warn(`🚨 [Guardrails Triggered] Riesgo crítico detectado en input: "${trimmedMessage}"`);
+      console.warn(`🚨 [Guardrails Triggered] Riesgo crítico detectado en input: ${userTextForLog(trimmedMessage)}`);
       finalResponse = sanitizeAndEnforceGuardrails(
         {},
         trimmedMessage,
@@ -1144,7 +1152,7 @@ async function handleChat(req, res, next) {
           aiStatus.stats.gemini++;
           aiStatus.lastSuccessAt = new Date().toISOString();
           console.log(
-            `🎯 [Gemini Emotion] Sesión="${sessionId}" | Emoción="${parsedOutput.user_emotion}" | Input="${trimmedMessage}"`
+            `🎯 [Gemini Emotion] Sesión="${sessionId}" | Emoción="${parsedOutput.user_emotion}" | Input=${userTextForLog(trimmedMessage)}`
           );
         } catch (llmError) {
           const info = describeGeminiError(llmError);
@@ -1164,7 +1172,7 @@ async function handleChat(req, res, next) {
           : detectAffectiveSituation(trimmedMessage);
 
       if (!parsedOutput) {
-        console.log(`[ChatController Bank] Categoría por palabras clave="${keywordCategory}" | Input="${trimmedMessage}"`);
+        console.log(`[ChatController Bank] Categoría por palabras clave="${keywordCategory}" | Input=${userTextForLog(trimmedMessage)}`);
         parsedOutput = generateMockResponse(trimmedMessage, session, keywordCategory);
         source = "fallback_bank";
         aiStatus.stats.fallback++;

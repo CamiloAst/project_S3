@@ -111,15 +111,21 @@ app.use((req, res, next) => {
 app.use((err, req, res, next) => {
   console.error("💥 [Global Error Handler]:", err.stack || err);
 
-  const statusCode = err.statusCode || 500;
+  const statusCode = err.statusCode || err.status || 500;
+  // Solo los errores del cliente marcados como públicos (p. ej. JSON mal formado de express.json)
+  // muestran su mensaje; los 5xx nunca revelan detalles internos salvo con DEBUG_ERRORS=true.
+  const isPublicError = statusCode < 500 && err.expose !== false;
+  const debugErrors = process.env.DEBUG_ERRORS === "true";
+
   const errorResponse = {
-    error: err.name || "InternalServerError",
-    message: err.message || "Ocurrió un error inesperado al procesar la solicitud.",
+    error: isPublicError ? err.name || "BadRequest" : "InternalServerError",
+    message: isPublicError || debugErrors
+      ? err.message || "Solicitud inválida."
+      : "Ocurrió un error inesperado al procesar la solicitud.",
     timestamp: new Date().toISOString()
   };
 
-  // En desarrollo se expone el stack trace para facilitar la depuración
-  if (process.env.NODE_ENV !== "production") {
+  if (debugErrors) {
     errorResponse.stack = err.stack;
   }
 

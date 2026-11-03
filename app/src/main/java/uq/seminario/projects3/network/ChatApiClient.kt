@@ -2,12 +2,14 @@ package uq.seminario.projects3.network
 
 import android.util.Log
 import com.google.gson.annotations.SerializedName
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.Interceptor
 import okhttp3.OkHttpClient
 import uq.seminario.projects3.BuildConfig
 import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.HttpException
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import retrofit2.http.Body
@@ -25,42 +27,86 @@ data class ChatRequest(
 )
 
 /**
- * Respuesta envolvente devuelta por el endpoint POST /api/chat.
+ * Respuesta ya validada de POST /api/chat que consume el ViewModel.
  */
 data class ChatResponse(
-    @SerializedName("success")
-    val success: Boolean,
-    @SerializedName("sessionId")
     val sessionId: String,
-    @SerializedName("data")
     val data: ChatData
 )
 
 /**
  * Datos multimodales sincronizados del Modelo CARE devueltos por el backend,
  * incluyendo síntesis de voz neural en Base64 y reloj maestro de sincronía (audio_duration_ms).
+ * Los textos nunca son nulos: los campos ausentes llegan como "" y el ViewModel aplica sus
+ * valores por defecto.
  */
 data class ChatData(
-    @SerializedName("spoken_text")
     val spoken_text: String,
-    @SerializedName("screen_text")
     val screen_text: String,
-    @SerializedName("user_emotion")
     val user_emotion: String,
-    @SerializedName("suggested_action")
     val suggested_action: String,
-    @SerializedName("audio_base64")
     val audio_base64: String? = null,
-    @SerializedName("audio_duration_ms")
     val audio_duration_ms: Long? = null
 )
+
+/**
+ * JSON crudo del backend. Gson ignora la nulabilidad de Kotlin y deja en `null` cualquier
+ * campo ausente, por eso todos los campos son opcionales y se validan en [toChatResponse].
+ */
+data class ChatResponseDto(
+    @SerializedName("success")
+    val success: Boolean? = null,
+    @SerializedName("sessionId")
+    val sessionId: String? = null,
+    @SerializedName("data")
+    val data: ChatDataDto? = null
+)
+
+data class ChatDataDto(
+    @SerializedName("spoken_text")
+    val spokenText: String? = null,
+    @SerializedName("screen_text")
+    val screenText: String? = null,
+    @SerializedName("user_emotion")
+    val userEmotion: String? = null,
+    @SerializedName("suggested_action")
+    val suggestedAction: String? = null,
+    @SerializedName("audio_base64")
+    val audioBase64: String? = null,
+    @SerializedName("audio_duration_ms")
+    val audioDurationMs: Long? = null
+)
+
+/**
+ * Convierte la respuesta cruda en [ChatResponse] o devuelve `null` si no es utilizable
+ * (success distinto de true, sin `data` o sin ningún texto que mostrar ni leer).
+ */
+fun ChatResponseDto.toChatResponse(requestSessionId: String): ChatResponse? {
+    if (success != true) return null
+    val raw = data ?: return null
+    val spoken = raw.spokenText?.trim().orEmpty()
+    val screen = raw.screenText?.trim().orEmpty()
+    if (spoken.isEmpty() && screen.isEmpty()) return null
+
+    return ChatResponse(
+        sessionId = sessionId ?: requestSessionId,
+        data = ChatData(
+            spoken_text = spoken,
+            screen_text = screen,
+            user_emotion = raw.userEmotion?.trim().orEmpty(),
+            suggested_action = raw.suggestedAction?.trim().orEmpty(),
+            audio_base64 = raw.audioBase64?.takeIf { it.isNotBlank() },
+            audio_duration_ms = raw.audioDurationMs
+        )
+    )
+}
 
 /**
  * Contrato Retrofit para la comunicación con el backend local en Node.js.
  */
 interface ChatApiService {
     @POST("api/chat")
-    suspend fun sendMessage(@Body request: ChatRequest): ChatResponse
+    suspend fun sendMessage(@Body request: ChatRequest): ChatResponseDto
 }
 
 /**
@@ -142,12 +188,21 @@ object ChatApiClient {
                 sessionId = sessionId,
                 message = message
             )
-            val response = apiService.sendMessage(request)
-            if (response.success) {
+            val response = apiService.sendMessage(request).toChatResponse(sessionId)
+            if (response != null) {
                 Result.success(response)
             } else {
-                Result.failure(IllegalStateException("El servidor indicó success=false para la sesión $sessionId"))
+                Result.failure(IllegalStateException("Respuesta del servidor incompleta o con success!=true"))
             }
+        } catch (e: CancellationException) {
+            // La cancelación (el usuario interrumpió) no debe tratarse como fallo de red
+            throw e
+        } catch (e: HttpException) {
+            if (e.code() == 401) {
+                // Configuración, no red: sin este aviso la app parecería simplemente "sin conexión"
+                Log.e(LOG_TAG, "El backend rechazó el token (401): revisa que care.apiToken coincida con API_ACCESS_TOKEN.")
+            }
+            Result.failure(e)
         } catch (e: Exception) {
             Result.failure(e)
         }

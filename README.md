@@ -154,3 +154,10 @@ npm test
 ./gradlew :app:testDebugUnitTest
 ```
 Las frases de posible emergencia existen en el backend (`services/emergencyDetector.js`) y en la app (`safety/EmergencyDetector.kt`); ambas suites usan los mismos casos de `backend/test/emergency-cases.json`.
+
+Las pruebas del controlador se ejecutan sin Gemini, sin voz neural (`EDGE_TTS_ENABLED=false`) y con sesiones en memoria, así que no necesitan red ni claves. GitHub Actions (`.github/workflows/ci.yml`) ejecuta ambas suites en cada pull request y en cada push a `main`.
+
+## 🔏 Privacidad de los registros
+
+- **Backend:** los logs muestran solo la longitud de cada mensaje (`<42 caracteres>`). Para ver el texto completo al depurar en local, usa `LOG_USER_TEXT=true`. Los errores 500 nunca devuelven detalles internos al cliente, salvo con `DEBUG_ERRORS=true`.
+- **Android:** el texto dictado, los resúmenes de respuesta y los cuerpos HTTP solo se registran en builds **debug**. Si el backend rechaza el token (401), Logcat lo indica de forma explícita.

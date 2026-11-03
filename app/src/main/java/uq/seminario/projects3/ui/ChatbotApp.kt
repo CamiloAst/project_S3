@@ -298,6 +298,7 @@ fun ChatbotApp(
                     is UiState.Repair -> {
                         RepairScreen(
                             message = state.message,
+                            hint = state.hint,
                             isPaused = isPaused,
                             onRetryClick = {
                                 viewModel.onMicClicked(
