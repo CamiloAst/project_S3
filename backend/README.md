@@ -29,7 +29,9 @@ backend/
 ├── controllers/
 │   └── chatController.js       # Orquestación con @google/genai, System Prompt, Guardrails y Banco CARE
 ├── middleware/
-│   └── security.js             # Token de acceso, límite de peticiones por IP y CORS
+│   ├── security.js             # Token de acceso, límite de peticiones por IP y CORS
+│   └── webClient.js            # Sirve la versión web de prueba en "/" con cabeceras de seguridad (CSP)
+├── public/                     # Versión web de prueba: misma conversación que la app, en el navegador
 ├── services/
 │   ├── emergencyDetector.js    # Frases de posible emergencia (replicadas en la app Android)
 │   ├── sessionStore.js         # Persistencia de sesiones (archivo JSON atómico, Redis o memoria)

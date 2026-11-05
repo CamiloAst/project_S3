@@ -161,6 +161,29 @@ Pensado para sesiones guiadas con un celular del equipo (Windows, desde la raíz
 - Se instala el build **debug**, que escribe en logcat el texto de la conversación: úsalo solo en el celular del equipo, no en los de los participantes.
 - Sin celular conectado, los scripts usan el emulador (sirve para ensayar).
 
+## 🌐 Versión web de prueba (sin instalar nada)
+
+> Esta versión vive solo en la rama `pruebas-web` y no se fusiona con `main`: la app Android sigue siendo el proyecto. Para traer a esta rama cambios del backend: `git merge main`.
+
+Para quien no puede instalar la APK, por ejemplo con un iPhone. El backend sirve en `/` una página (`backend/public/`) con la misma conversación: elección de acompañante, voz neural, texto corto en pantalla, Sí/No, reparación y emergencia simulada. En local: `npm run dev` en `backend/` y abrir `http://localhost:3000/`.
+
+- Funciona en **Safari (iPhone)** y **Chrome** (Android y computador). En iPhone hay que permitir el micrófono y tener activado *Dictado* (Ajustes > General > Teclado). Si el navegador no reconoce la voz, la página deja escribir el mensaje.
+- No prueba la app Android en sí: faltan el botón «Atrás» del celular, la vibración y la voz local de respaldo. Sin conexión no tiene banco de respuestas local.
+- Pide un código de acceso, que es el `API_ACCESS_TOKEN` del backend. Puede ir en el enlace después de `#`, una parte que nunca llega al servidor: `https://tu-servicio.onrender.com/#codigo=<API_ACCESS_TOKEN>`.
+
+### Publicarla gratis en Render
+
+1. Crea una cuenta gratuita en [Render](https://render.com) con tu GitHub. Comprueba que el plan gratuito no pida tarjeta.
+2. **New > Blueprint**, elige este repositorio y la rama que quieres desplegar: Render lee `render.yaml`.
+3. Escribe los dos secretos que pide: `GEMINI_API_KEY` y `API_ACCESS_TOKEN`. Para la web conviene un token nuevo: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`.
+4. Al terminar, la página queda en `https://care-asistente.onrender.com`, o en el nombre que asigne Render si ese está ocupado.
+
+- El plan gratuito se duerme tras 15 minutos sin uso y la primera visita después tarda cerca de un minuto.
+- Cada `git push` a esa rama vuelve a desplegar.
+- La cuota gratuita de Gemini es una sola para la web y la app: todas las pruebas la comparten.
+- No está comprobado que la voz neural de Edge funcione desde los servidores de Render. Si falla, la página usa la voz del navegador.
+- Si el código se filtra, cámbialo en Render (`API_ACCESS_TOKEN`) y envía un enlace nuevo.
+
 ## 🔐 Seguridad de la API
 
 - `API_ACCESS_TOKEN` (en `backend/.env`): token compartido que la app envía como `Authorization: Bearer <token>`. Es obligatorio con `NODE_ENV=production`; en desarrollo, si está vacío, la API acepta peticiones sin token y lo avisa en consola.

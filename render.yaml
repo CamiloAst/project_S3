@@ -1,0 +1,33 @@
+# Despliegue gratuito del backend (API + versión web de prueba) en Render como "Blueprint".
+# Solo existe en la rama pruebas-web, que no se fusiona con main.
+# En Render: New > Blueprint, elegir este repositorio y escribir los dos secretos que pide.
+# El plan free se duerme tras 15 min sin uso: la primera visita después tarda en despertarlo.
+services:
+  - type: web
+    name: care-asistente
+    runtime: node
+    plan: free
+    branch: pruebas-web
+    region: virginia
+    rootDir: backend
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # Render pasa las peticiones por su proxy: sin esto todos compartirían el límite por minuto
+      - key: TRUST_PROXY
+        value: "1"
+      # El disco del plan free se borra en cada reinicio; las sesiones caducan a los 60 min igualmente
+      - key: SESSION_STORE
+        value: memory
+      - key: LOG_USER_TEXT
+        value: "false"
+      # Secretos: Render los pide al crear el Blueprint y nunca se guardan en el repositorio
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: API_ACCESS_TOKEN
+        sync: false

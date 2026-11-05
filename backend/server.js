@@ -24,6 +24,7 @@ const {
   buildCorsOptions,
   isTokenRequired
 } = require("./middleware/security");
+const { serveWebClient } = require("./middleware/webClient");
 
 const { version: SERVICE_VERSION } = require("./package.json");
 
@@ -49,6 +50,9 @@ app.use(cors(buildCorsOptions()));
 // Parseo de cuerpo JSON (los mensajes están limitados a 2000 caracteres en el controlador)
 app.use(express.json({ limit: "32kb" }));
 
+// Versión web de prueba en "/" (backend/public): mismo origen que la API, sin CORS
+app.use(serveWebClient());
+
 // Middleware para registrar la latencia de cada solicitud
 app.use((req, res, next) => {
   const start = Date.now();
@@ -67,7 +71,7 @@ app.use((req, res, next) => {
 
 /**
  * Healthcheck y verificación de estado del servicio.
- * GET / o GET /api/health
+ * GET /api/health ("/" sirve la versión web de prueba)
  */
 const healthHandler = (req, res) => {
   res.status(200).json({
@@ -84,7 +88,6 @@ const healthHandler = (req, res) => {
   });
 };
 
-app.get("/", healthHandler);
 app.get("/api/health", healthHandler);
 
 /**
@@ -146,6 +149,7 @@ const server = app.listen(PORT, () => {
   console.log(`📡 Servidor escuchando en: http://localhost:${PORT}`);
   console.log(`📱 Enlace Android Emulator:  http://10.0.2.2:${PORT}/api/chat`);
   console.log(`❤️  Health check disponible: http://localhost:${PORT}/api/health`);
+  console.log(`🌐 Versión web de prueba:    http://localhost:${PORT}/`);
   console.log("=======================================================\n");
 });
 

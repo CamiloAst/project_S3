@@ -25,6 +25,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
   - `services/emergencyDetector.js`, `services/sessionStore.js` (file/redis/memory), `services/ttsService.js` (una voz neural por acompañante, `VOICE_PROFILES`).
   - `middleware/security.js`: token Bearer y utilidades de privacidad de logs.
   - `test/`: pruebas del controlador, detector (casos compartidos en `emergency-cases.json`), seguridad y voces del TTS.
+- `backend/public/` (`index.html`, `estilos.css`, `app.js`, `img/`): versión web de prueba, servida en `/` por `backend/middleware/webClient.js`. `render.yaml` (raíz) la despliega junto con la API en Render.
 - `scripts/pruebas-usuarios/`: scripts de Windows PowerShell 5.1 (con `.cmd` para doble clic) para las pruebas con usuarios reales. `iniciar-pruebas` prepara cada jornada: backend, túnel HTTPS e instalación en el celular. `reiniciar-participante` deja la app como recién instalada. `comun.ps1` reúne las funciones compartidas. Los `.ps1` se guardan en UTF-8 con BOM, porque sin él PowerShell 5.1 lee mal los acentos.
 
 ## 4. Cómo ejecutar
@@ -34,6 +35,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Pruebas de UI en emulador (no corren en CI): `./gradlew :app:connectedDebugAndroidTest` (incluye `ThinkingScreenTest` y `AvatarSelectionScreenTest`). Ojo: esta tarea desinstala la app al terminar, así que se pierden los permisos concedidos y el acompañante elegido.
 - Configuración app ↔ backend en `local.properties`: `care.apiBaseUrl.debug`, `care.apiBaseUrl.release` (HTTPS obligatorio), `care.apiToken` (igual a `API_ACCESS_TOKEN`).
 - Android 17+ (`targetSdk = 37`): la app debug pide al abrirse el permiso «Dispositivos cercanos / red local» (`ACCESS_LOCAL_NETWORK`). Si se deniega, no llega al backend (ni siquiera a `10.0.2.2`) y todas las respuestas salen del respaldo local. Alternativa sin permiso: `adb reverse tcp:3000 tcp:3000` y `care.apiBaseUrl.debug=http://127.0.0.1:3000/`.
+- Versión web de prueba (detalle en el README): con el backend en marcha, `http://localhost:3000/`. Para publicarla, en Render: New > Blueprint con este repositorio y los secretos `GEMINI_API_KEY` y `API_ACCESS_TOKEN`. El enlace para quien prueba es `https://<servicio>.onrender.com/#codigo=<API_ACCESS_TOKEN>`.
 - Pruebas con usuarios reales en un celular del equipo (detalle en el README): `scripts\pruebas-usuarios\iniciar-pruebas.cmd` al empezar cada jornada, con el celular por USB; necesita `cloudflared` y `API_ACCESS_TOKEN`. Antes de cada participante: `scripts\pruebas-usuarios\reiniciar-participante.cmd`. Admiten `-Serial`; `iniciar-pruebas` también admite `-Url` (túnel propio) y `-SinPruebaChat`.
 - Comprobar la voz neural: `GET /api/health` → `tts.stats` (`neural` = audios entregados; `retries`, `failures`, `skipped` = intentos fallidos o sin plazo; `lastError`). En consola, `🎙️ [Neural TTS] ... intento N` o `🔁 [Neural TTS] Intento N/2 falló` y `⚠️ [Neural TTS Fallback]` (la app usará su voz local, más robótica).
 - Comprobar que responde Gemini: cada mensaje que llega deja en la consola del backend `POST /api/chat`, `⚡ [Gemini LLM Latency]` y `🎯 [Gemini Emotion]` (o `🛡️ [Fallback Activado]`); `GET /api/health` muestra `aiProvider.stats.gemini`, `stats.retries`, `lastSuccessAt` y `lastError`. Los reintentos aparecen como `🔁 [Gemini Retry]`. En logcat (`ChatbotViewModel`), «Respuesta CARE recibida» = backend; «Aplicando respaldo CARE local» = no llegó. Consola del backend en silencio = la petición no llegó.
@@ -64,6 +66,13 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
   - lee el `sessionId` con `run-as` (solo posible en debug) y borra esa sesión del backend;
   - hace `pm clear` y `logcat -c`;
   - vuelve a conceder los permisos con `pm grant`, para que el participante no vea diálogos.
+- Versión web de prueba (2026-11-05): el profesor usa iPhone y no puede instalar la APK. Decisión del usuario: vive solo en la rama `pruebas-web` y no se fusiona, porque es solo para las pruebas y el proyecto es la app Kotlin. Se usa una rama y no un fork porque GitHub no deja hacer un fork de un repositorio propio en la misma cuenta. Se descartaron los emuladores Android en el navegador (como Appetize), porque la app solo se usa por voz y no garantizan el micrófono.
+  - La sirve el mismo backend en `/`: un único despliegue gratuito y sin CORS.
+  - `app.js` replica la máquina de estados y los textos de `ChatbotViewModel`.
+  - Reconocimiento de voz del navegador (Web Speech API); sin él o sin micrófono, se escribe el mensaje.
+  - Sin banco de respuestas local: ante un fallo de red muestra la pantalla de reparación con la pista de pedir ayuda si es urgente, para no triplicar las frases de emergencia.
+  - El código de acceso es `API_ACCESS_TOKEN`: va en el fragmento del enlace (`#codigo=`), que no llega al servidor ni a sus registros. La CSP solo admite recursos propios y el DOM se construye sin `innerHTML`, para que ningún script ajeno lea el token guardado en `localStorage`.
+  - Render, plan gratuito: despliegue desde GitHub con `render.yaml`, `SESSION_STORE=memory` (el disco se borra en cada reinicio) y región Virginia (la más cercana a Colombia).
 
 ## 6. Estado actual
 - Correcciones de criticidad alta, media y baja integradas en `main` (PR #2, #3 y #4).
@@ -79,9 +88,14 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
   - De `iniciar-pruebas` funcionan las comprobaciones previas, la reutilización del backend, la verificación del token y la compilación e instalación con `-P`.
   - **Sin probar**: el túnel de Cloudflare (`cloudflared` no está instalado en este PC) y el mensaje de prueba a través del túnel. Nada se ha probado aún en un celular físico.
 - El 2026-11-03 la cuota gratuita de Gemini estaba agotada (`fallback_reason: quota_exceeded`): todas las respuestas salían del banco de respaldo.
+- Versión web de prueba (2026-11-05), probada en el navegador integrado de Claude (Chromium, con el micrófono bloqueado) contra un backend local con Gemini real:
+  - Funcionan el código de acceso (válido, inválido y por enlace), la elección de acompañante, una respuesta de Gemini con voz neural de Salomé (3,6 s), la emergencia simulada, «Atrás» del navegador y de la pantalla, pausa y continuación de la lectura, y el paso a escribir cuando no hay micrófono.
+  - Backend 33/33 (4 pruebas nuevas en `webClient.test.js`).
+  - **Sin probar**: el reconocimiento de voz real, Safari en iPhone (permiso de micrófono, Dictado, si el audio sale por el auricular tras usar el micrófono), el despliegue en Render (requiere la cuenta del usuario) y si Edge TTS funciona desde Render.
 - Problemas conocidos: el `JAVA_HOME` global de esta máquina apunta a un JRE inexistente.
 
 ## 7. Próximos pasos
+- Crear la cuenta de Render, desplegar el Blueprint, probar la web en un iPhone y enviar el enlace al profesor.
 - Instalar `cloudflared` y ensayar `iniciar-pruebas.cmd` con el celular del equipo: que `/quicktunnel` devuelva la URL y que el mensaje de prueba llegue por el túnel.
 - Cerrar las preguntas abiertas del protocolo: edad mínima, aval de ética, fechas, grabación e inclusión de la emergencia simulada.
 - Escuchar las muestras de `muestras-voz/` y, si otra voz suena más natural (p. ej. las multilingües de Edge), fijarla con `EDGE_TTS_VOICE` / `EDGE_TTS_VOICE_MALE` sin tocar código. Revisar `tts.stats` en `/api/health` tras una sesión real.
@@ -93,6 +107,13 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Definir la URL HTTPS de release y desplegar el backend con `API_ACCESS_TOKEN`.
 
 ## 8. Historial
+- **2026-11-05 (10)**: versión web de prueba para el profesor, que usa iPhone. Incluye:
+  - `backend/public/` con la misma conversación que la app;
+  - `middleware/webClient.js` con CSP; `GET /` deja de ser el health check;
+  - `render.yaml` para Render gratis;
+  - 4 pruebas nuevas.
+
+  Probada en el navegador integrado salvo el micrófono real y el iPhone.
 - **2026-11-03 (9)**: preparación de las pruebas con usuarios reales. Nuevos scripts en `scripts/pruebas-usuarios/`:
   - `iniciar-pruebas`: backend con `TRUST_PROXY=1`, comprobación del token, túnel de Cloudflare, instalación con `-P`, permisos y mensaje de prueba;
   - `reiniciar-participante`: borra la sesión en el backend, hace `pm clear` y `logcat -c` y vuelve a conceder los permisos.
