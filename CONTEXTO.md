@@ -72,7 +72,8 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Elección de acompañante funcionando en el emulador (elegir, cambiar y "Atrás"). Comprobado en vivo que `handleChat` con `companion: "male"` devuelve audio de `es-CO-GonzaloNeural` y con `"female"` de Salomé. Falta: oírlo en el teléfono, ver que Gemini real respeta el género indicado y escuchar cómo suena el respaldo local con tono bajo.
 - El reconocimiento de voz ya funciona en el emulador (Android 17). Hasta este arreglo, la app nunca llegaba al backend (Android 17 bloqueaba `10.0.2.2`) y todas las respuestas eran del respaldo local. Con el permiso concedido, la conexión a `10.0.2.2:3000` funciona; falta ver una conversación completa respondida por Gemini.
 - La memoria resumida no se ha probado aún contra Gemini real (las pruebas corren sin clave). Se verifica con el log `🧠 [Memoria]` y `hasMemory` en `GET /api/chat/session/:sessionId`.
-- El guardrail médico responde «¿Quieres que contactemos a tu cuidador…?», lo que contradice la regla de no prometer contactar a nadie; pendiente de corregir.
+- El guardrail médico responde «¿Quieres que contactemos a tu cuidador…?». Decisión del usuario (2026-11-04): no se corrige, porque en el entorno de pruebas no hay cuidadores y todo es simulado. El protocolo de pruebas lo explica a participantes y moderadores.
+- Protocolo de pruebas con usuarios redactado (2026-11-04) como documento en claude.ai, privado hasta que se comparta: https://claude.ai/artifact/7ojZ88YLnbh9zLaTCgktxh. Incluye objetivo, participantes y consentimiento, preparación, desarrollo de la sesión, ocho tareas, medidas, hoja de observación, cuestionario SUS y preguntas abiertas.
 - Scripts de pruebas con usuarios (2026-11-03), probados en el emulador:
   - `reiniciar-participante` funciona completo: borra la sesión, la app abre en la elección de acompañante y los permisos quedan concedidos sin diálogos.
   - De `iniciar-pruebas` funcionan las comprobaciones previas, la reutilización del backend, la verificación del token y la compilación e instalación con `-P`.
@@ -82,7 +83,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 
 ## 7. Próximos pasos
 - Instalar `cloudflared` y ensayar `iniciar-pruebas.cmd` con el celular del equipo: que `/quicktunnel` devuelva la URL y que el mensaje de prueba llegue por el túnel.
-- Corregir el guardrail médico («¿Quieres que contactemos a tu cuidador…?») antes de las pruebas con personas reales.
+- Cerrar las preguntas abiertas del protocolo: edad mínima, aval de ética, fechas, grabación e inclusión de la emergencia simulada.
 - Escuchar las muestras de `muestras-voz/` y, si otra voz suena más natural (p. ej. las multilingües de Edge), fijarla con `EDGE_TTS_VOICE` / `EDGE_TTS_VOICE_MALE` sin tocar código. Revisar `tts.stats` en `/api/health` tras una sesión real.
 - Probar con Gemini real y en un teléfono que el compañero habla con voz y género masculinos; si el tono bajo del respaldo local suena mal, buscar en `tts.voices` una voz masculina conocida del motor de Google.
 - Los textos fijos aún tratan al usuario en masculino genérico ("tranquilo", "acompañado"); el género del usuario no se conoce.
