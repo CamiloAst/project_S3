@@ -46,7 +46,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Presupuesto de 18 s en backend, por debajo del `readTimeout` de 25 s de la app, para no guardar turnos que el usuario no vio.
 - El texto del usuario no se escribe en logs por defecto (`userTextForLog()`, logs Android solo en debug).
 - En segundo plano se pausa el audio y el micrófono; solo una alerta de emergencia suena igualmente.
-- `.idea/deploymentTargetSelector.xml` fuera de git (es local de cada equipo).
+- `.idea/deploymentTargetSelector.xml` fuera de git (es local de cada equipo). `.idea/vcs.xml` sí se versiona, como el resto de la configuración compartida de `.idea`: solo indica que el proyecto usa Git. `muestras-voz/` está en `.gitignore` (MP3 generados para comparar voces).
 - Pantalla "Pensando" (`UiState.Thinking`) desde el fin de la voz hasta la respuesta: solo en pantalla, sin voz (Asignación), para no solaparse con la respuesta; a los 8 s cambia el mensaje para tranquilizar. Es transitoria como `Listening` (no entra en el historial de "Atrás").
 - El icono de escucha (barras + halo) sigue el volumen real de la voz (`onRmsChanged` → `voiceLevel`), leído en fase de dibujo para no recomponer la app.
 - Sin barra de estados de prueba: se quitó para las pruebas con usuarios reales.
@@ -78,7 +78,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
   - De `iniciar-pruebas` funcionan las comprobaciones previas, la reutilización del backend, la verificación del token y la compilación e instalación con `-P`.
   - **Sin probar**: el túnel de Cloudflare (`cloudflared` no está instalado en este PC) y el mensaje de prueba a través del túnel. Nada se ha probado aún en un celular físico.
 - El 2026-11-03 la cuota gratuita de Gemini estaba agotada (`fallback_reason: quota_exceeded`): todas las respuestas salían del banco de respaldo.
-- Problemas conocidos: el `JAVA_HOME` global de esta máquina apunta a un JRE inexistente; `.idea/vcs.xml` aparece sin versionar (generado por Android Studio).
+- Problemas conocidos: el `JAVA_HOME` global de esta máquina apunta a un JRE inexistente.
 
 ## 7. Próximos pasos
 - Instalar `cloudflared` y ensayar `iniciar-pruebas.cmd` con el celular del equipo: que `/quicktunnel` devuelva la URL y que el mensaje de prueba llegue por el túnel.
@@ -90,7 +90,6 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Comprobar con Gemini real que una conversación larga recuerda datos del principio y medir si la latencia sube.
 - Probar el flujo completo en un dispositivo físico contra el backend con Gemini real (voz real: animación del icono y pantalla "Pensando").
 - Definir la URL HTTPS de release y desplegar el backend con `API_ACCESS_TOKEN`.
-- Decidir si se versiona o se ignora `.idea/vcs.xml`.
 
 ## 8. Historial
 - **2026-11-03 (9)**: preparación de las pruebas con usuarios reales. Nuevos scripts en `scripts/pruebas-usuarios/`:

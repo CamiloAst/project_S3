@@ -19,3 +19,6 @@ node_modules/
 
 # Selección de dispositivo de Android Studio (local de cada equipo)
 /.idea/deploymentTargetSelector.xml
+
+# MP3 generados para comparar voces de Edge TTS (se regeneran; no se versionan)
+/muestras-voz/
