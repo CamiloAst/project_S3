@@ -20,6 +20,9 @@
   --sereno-tarjeta: #FFFBF5;
   --sereno-acento: #2B5B46;
   --lavanda: #7C6BB4;
+  --imagen-fondo: #EDF3EE;
+  --imagen-borde: #CADBCF;
+  --sereno-borde: #B7D1C0;
   --radio: 20px;
 }
 
@@ -197,6 +200,27 @@ button:focus-visible, input:focus-visible, textarea:focus-visible {
 body.sereno .tarjeta { background: var(--sereno-tarjeta); }
 .resumen { font-size: 28px; font-weight: 700; line-height: 1.25; text-align: center; }
 .respiracion { color: var(--sereno-acento); text-align: center; font-weight: 600; }
+
+/* Ilustración del banco local que acompaña la respuesta (ContextImageCard en la app) */
+.imagen-tema {
+  margin: 0;
+  padding: 8px;
+  display: flex;
+  justify-content: center;
+  background: var(--imagen-fondo);
+  border: 1.5px solid var(--imagen-borde);
+  border-radius: 24px;
+}
+.imagen-tema img { display: block; height: 130px; width: auto; max-width: 100%; }
+body.sereno .imagen-tema { background: var(--sereno-tarjeta); border-color: var(--sereno-borde); }
+body.alerta .imagen-tema { background: var(--tarjeta); border-color: var(--rojo-borde); }
+
+/* Decisión: avatar e imagen en una fila, para que los botones Sí/No sigan a la vista */
+/* El margen izquierdo deja sitio a las ondas del avatar mientras habla */
+.fila-avatar { display: flex; align-items: center; gap: 16px; padding-left: 10px; }
+.fila-avatar .avatar { width: 100px; height: 100px; margin: 0; }
+.imagen-tema.compacta { flex: 1; min-width: 0; }
+.imagen-tema.compacta img { height: 84px; }
 
 /* Controles de lectura */
 .controles { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }

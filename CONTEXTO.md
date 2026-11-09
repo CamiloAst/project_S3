@@ -26,7 +26,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
   - `services/emergencyDetector.js`, `services/sessionStore.js` (file/redis/memory), `services/ttsService.js` (una voz neural por acompañante, `VOICE_PROFILES`), `services/imageCatalog.js` (claves del banco de imágenes, temas por palabras clave y reglas por emoción).
   - `middleware/security.js`: token Bearer y utilidades de privacidad de logs.
   - `test/`: pruebas del controlador, detector (casos compartidos en `emergency-cases.json`), catálogo de imágenes (claves compartidas con la app en `image-keys.json`), seguridad y voces del TTS.
-- `backend/public/` (`index.html`, `estilos.css`, `app.js`, `img/`): versión web de prueba, servida en `/` por `backend/middleware/webClient.js`. `render.yaml` (raíz) la despliega junto con la API en Render.
+- `backend/public/` (`index.html`, `estilos.css`, `app.js`, `img/`, con las ilustraciones en `img/temas/*.svg`): versión web de prueba, servida en `/` por `backend/middleware/webClient.js`. `render.yaml` (raíz) la despliega junto con la API en Render.
 - `scripts/pruebas-usuarios/`: scripts de Windows PowerShell 5.1 (con `.cmd` para doble clic) para las pruebas con usuarios reales. `iniciar-pruebas` prepara cada jornada: backend, túnel HTTPS e instalación en el celular. `reiniciar-participante` deja la app como recién instalada. `comun.ps1` reúne las funciones compartidas. Los `.ps1` se guardan en UTF-8 con BOM, porque sin él PowerShell 5.1 lee mal los acentos.
 
 ## 4. Cómo ejecutar
@@ -99,6 +99,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
   - Funcionan el código de acceso (válido, inválido y por enlace), la elección de acompañante, una respuesta de Gemini con voz neural de Salomé (3,6 s), la emergencia simulada, «Atrás» del navegador y de la pantalla, pausa y continuación de la lectura, y el paso a escribir cuando no hay micrófono.
   - Backend 33/33 (4 pruebas nuevas en `webClient.test.js`).
   - **Sin probar**: el reconocimiento de voz real, Safari en iPhone (permiso de micrófono, Dictado, si el audio sale por el auricular tras usar el micrófono), el despliegue en Render (requiere la cuenta del usuario) y si Edge TTS funciona desde Render.
+  - Imágenes contextuales en la web (2026-11-08), probadas igual (móvil de 375×812, Gemini real): «boleros en la radio» → radio (`musica`), «me duele mucho el pecho» → imagen fija de ayuda cercana, la cita médica → decisión Sí/No con el calendario (`agenda`) junto al avatar. Las SVG cargan con la CSP estricta y el texto alternativo describe cada imagen. Backend 44/44.
 - Problemas conocidos: el `JAVA_HOME` global de esta máquina apunta a un JRE inexistente.
 
 ## 7. Próximos pasos
@@ -116,6 +117,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Definir la URL HTTPS de release y desplegar el backend con `API_ACCESS_TOKEN`.
 
 ## 8. Historial
+- **2026-11-08 (web)**: `feat/pruebas-usuarios` fusionada en `pruebas-web` y la versión web muestra las mismas imágenes: 18 SVG en `backend/public/img/temas/`, `imagenDe()` en `app.js` (misma resolución que `ContextImage`), imagen en las pantallas de respuesta, decisión (junto al avatar) y emergencia, y 1 prueba nueva en `webClient.test.js`.
 - **2026-11-08**: imágenes contextuales del modelo CARE desde un banco local. Nuevo campo `image_key` en `/api/chat` (Gemini lo elige de un enum; el respaldo usa el tema del mensaje o la emoción), `services/imageCatalog.js`, 18 ilustraciones vectoriales originales, `ContextImage` y `ContextImageCard` en las pantallas de respuesta, recomendación, decisión y emergencia. Pruebas: 10 nuevas en el backend, 6 unitarias y 4 de UI en la app; claves compartidas en `backend/test/image-keys.json`.
 - **2026-11-05 (10)**: versión web de prueba para el profesor, que usa iPhone. Incluye:
   - `backend/public/` con la misma conversación que la app;

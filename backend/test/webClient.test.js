@@ -48,6 +48,20 @@ test("la página nunca interpreta como HTML los textos que llegan del servidor",
   assert.doesNotMatch(appJs(), /innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(/);
 });
 
+test("la web tiene una ilustración y una descripción para cada clave del banco de imágenes", async () => {
+  const claves = require("./image-keys.json");
+  for (const clave of [...claves.selectable, claves.emergency]) {
+    const respuesta = await fetch(`${baseUrl}/img/temas/${clave}.svg`);
+    assert.equal(respuesta.status, 200, `img/temas/${clave}.svg`);
+    assert.match(respuesta.headers.get("content-type"), /image\/svg\+xml/);
+    assert.match(appJs(), new RegExp(`\\b${clave}: "[^"]+"`), `descripción de "${clave}" en IMAGENES`);
+  }
+  assert.match(appJs(), new RegExp(`IMAGEN_EMERGENCIA = "${claves.emergency}"`));
+  for (const [emocion, clave] of Object.entries(claves.defaultsByEmotion)) {
+    assert.match(appJs(), new RegExp(`${emocion}: "${clave}"`), emocion);
+  }
+});
+
 test("los acompañantes de la web son las voces del backend", () => {
   for (const companion of Object.keys(VOICE_PROFILES)) {
     assert.match(appJs(), new RegExp(`\\b${companion}: \\{ etiqueta:`), companion);

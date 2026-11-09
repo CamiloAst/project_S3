@@ -25,6 +25,40 @@
     female: { etiqueta: "Compañera", imagen: "img/avatar_companera.webp", tonoLocal: 1.0 }
   };
 
+  // Banco local de imágenes (modelo CARE): mismas claves y descripciones que ContextImage.kt en la
+  // app; las ilustraciones son las de res/drawable/img_*.xml, aquí como img/temas/<clave>.svg.
+  // El backend solo envía `image_key` y la página únicamente carga claves de esta lista.
+  const IMAGENES = {
+    saludo: "Taza de café caliente frente a una ventana con sol",
+    salud: "Carpeta médica con un corazón",
+    agenda: "Calendario con un día marcado y un reloj",
+    familia: "Familia reunida bajo un corazón",
+    mascotas: "Un perro y un gato sentados juntos",
+    musica: "Radio antigua con notas musicales",
+    lectura: "Libro abierto y unas gafas",
+    comida: "Plato de sopa caliente con una arepa",
+    naturaleza: "Sendero entre árboles bajo el sol",
+    espiritualidad: "Vela encendida con luz cálida",
+    descanso: "Cama bajo un cielo de noche con luna y estrellas",
+    clima: "Sol detrás de una nube con lluvia",
+    recuerdos: "Fotografías antiguas",
+    alegria: "Sol radiante sobre flores de colores",
+    calma: "Hoja verde dentro de círculos serenos",
+    acompanamiento: "Dos personas sentadas juntas en una banca",
+    escucha: "Dos globos de conversación con un signo de pregunta",
+    ayuda_cercana: "Una persona apoya la mano en el hombro de otra para ayudarla"
+  };
+  // Reservada a las posibles emergencias (Redundancia): ninguna otra respuesta la muestra
+  const IMAGEN_EMERGENCIA = "ayuda_cercana";
+  // Imagen por defecto de cada emoción (DEFAULT_IMAGE_BY_EMOTION en imageCatalog.js)
+  const IMAGEN_POR_EMOCION = {
+    POSITIVA: "alegria",
+    NEGATIVA_TRISTEZA_SOLEDAD: "acompanamiento",
+    NEGATIVA_ANSIEDAD_PREOCUPACION: "calma",
+    NEUTRA: "saludo",
+    AMBIGUA: "escucha"
+  };
+
   // Mismos textos que UiState y las pantallas de la app
   const TEXTO = {
     reparacion: "No he entendido tu pregunta. ¿Puedes repetirla?",
@@ -113,6 +147,15 @@
 
   function esAfectiva(emocion) {
     return /TRISTEZA|SOLEDAD|ANSIEDAD|PREOCUPACION/.test(emocion || "");
+  }
+
+  // Como ContextImage.resolve en la app: la emergencia lleva siempre su imagen; una clave ausente
+  // (backend anterior), desconocida o reservada se cambia por la imagen de la emoción
+  function imagenDe(clave, emocion, accion) {
+    if (accion === "emergency_alert") return IMAGEN_EMERGENCIA;
+    const valor = String(clave || "").trim().toLowerCase();
+    const valida = Object.prototype.hasOwnProperty.call(IMAGENES, valor) && valor !== IMAGEN_EMERGENCIA;
+    return valida ? valor : (IMAGEN_POR_EMOCION[emocion] || "saludo");
   }
 
   function saludo() {
@@ -400,6 +443,7 @@
     const voz = String(datos.spoken_text || "").trim();
     const resumen = String(datos.screen_text || "").trim();
     const audio = typeof datos.audio_base64 === "string" && datos.audio_base64 ? datos.audio_base64 : null;
+    const imagen = imagenDe(datos.image_key, emocion, accion);
 
     let pantalla;
     if (accion === "emergency_alert") {
@@ -410,10 +454,10 @@
     } else if (accion === "retry") {
       pantalla = { tipo: "reparacion", mensaje: TEXTO.reparacion, pista: TEXTO.pistaReparacion, voz: voz || TEXTO.reparacion, audio };
     } else if (accion === "show_decision_buttons") {
-      pantalla = { tipo: "decision", pregunta: resumen || TEXTO.preguntaDecision, voz: voz || TEXTO.respuestaVacia, emocion, audio };
+      pantalla = { tipo: "decision", pregunta: resumen || TEXTO.preguntaDecision, voz: voz || TEXTO.respuestaVacia, emocion, imagen, audio };
     } else {
       const porDefecto = /TRISTEZA|SOLEDAD/.test(emocion) ? "Un lugar sereno para respirar" : "Estamos aquí contigo para acompañarte";
-      pantalla = { tipo: "hablando", resumen: resumen || porDefecto, voz: voz || TEXTO.respuestaVacia, emocion, audio };
+      pantalla = { tipo: "hablando", resumen: resumen || porDefecto, voz: voz || TEXTO.respuestaVacia, emocion, imagen, audio };
     }
     transicion(pantalla);
     reproducir(pantalla);
@@ -600,6 +644,14 @@
     return h("button", { ...atributos, type: "button", onclick: alTocar, "aria-label": "Cambiar de acompañante" }, ...contenido);
   }
 
+  // Complementariedad (CARE): ilustra el tema de la conversación. Equivalencia: el texto alternativo
+  // la describe para quien usa un lector de pantalla. No se puede tocar (solo es apoyo visual).
+  function imagenTema(clave, { compacta = false } = {}) {
+    return h("figure", { clase: `imagen-tema${compacta ? " compacta" : ""}` },
+      // Sin el prefijo "Imagen:" de la app: el lector de pantalla ya anuncia que es una imagen
+      h("img", { src: `img/temas/${clave}.svg`, alt: IMAGENES[clave], width: 240, height: 160 }));
+  }
+
   function microfono(escuchando) {
     return h("button", {
       clase: `microfono${escuchando ? " escuchando" : ""}`,
@@ -739,6 +791,7 @@
         cabecera(),
         h("div", { clase: "crece" },
           avatar(),
+          imagenTema(p.imagen),
           h("div", { clase: "tarjeta" }, h("h1", { clase: "resumen" }, p.resumen)),
           esAfectiva(p.emocion) && h("p", { clase: "respiracion" }, "Inhala despacio y exhala suavemente"),
           controlesDeLectura()),
@@ -750,7 +803,8 @@
       return [
         cabecera(),
         h("div", { clase: "crece" },
-          avatar(),
+          // Como en la app: la imagen va junto al avatar para no restar espacio a los botones Sí/No
+          h("div", { clase: "fila-avatar" }, avatar(), imagenTema(p.imagen, { compacta: true })),
           h("div", { clase: "tarjeta" }, h("h1", { clase: "resumen" }, p.pregunta)),
           h("button", { clase: "decision si", type: "button", onclick: () => decidir(true) },
             h("strong", {}, "Sí"), h("span", {}, "Seguir hablando con tu asistente")),
@@ -780,6 +834,7 @@
           avatar({ alerta: true, distintivo: "!" }),
           h("p", { clase: "etiqueta-alerta" }, "Posible emergencia"),
           h("div", { clase: "tarjeta emergencia" }, h("h1", { clase: "resumen" }, p.resumen)),
+          imagenTema(IMAGEN_EMERGENCIA),
           h("p", { clase: "centro" }, "Busca ahora a un familiar, vecino o a tu cuidador. No hagas esfuerzos mientras llega la ayuda."),
           controlesDeLectura(),
           h("p", { clase: "nota-prueba" }, "Modo de prueba: esta aplicación no llama ni avisa a nadie automáticamente.")),
