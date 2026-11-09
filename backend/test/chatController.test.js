@@ -23,6 +23,7 @@ const {
   RESPONSE_VARIATIONS_BANK,
   EMOTION_CATEGORIES
 } = require("../controllers/chatController");
+const { SELECTABLE_IMAGE_KEYS, EMERGENCY_IMAGE_KEY } = require("../services/imageCatalog");
 
 const VALID_ACTIONS = ["continue", "show_decision_buttons", "clarify", "emergency_alert"];
 
@@ -65,6 +66,7 @@ test("una posible emergencia responde emergency_alert sin prometer llamadas", as
   assert.equal(body.source, "emergency_guardrail");
   assert.equal(body.data.suggested_action, "emergency_alert");
   assert.doesNotMatch(body.data.spoken_text, /te comunico|vamos a avisar|llamar[eé]/i);
+  assert.equal(body.data.image_key, EMERGENCY_IMAGE_KEY, "Redundancia: imagen fija de ayuda cercana");
   assert.equal(body.data.audio_base64, null);
 });
 
@@ -79,6 +81,21 @@ test("sin Gemini responde desde el banco con un contrato válido", async () => {
   const screenWords = body.data.screen_text.trim().split(/\s+/).length;
   assert.ok(screenWords >= 4 && screenWords <= 7, `screen_text con ${screenWords} palabras`);
   assert.notEqual(body.data.screen_text, body.data.spoken_text);
+  assert.equal(body.data.image_key, "familia", "la imagen sigue al tema del mensaje");
+});
+
+test("la imagen del respaldo respeta la emoción y nunca queda vacía", async () => {
+  const sad = await callChat({ message: "me siento muy sola, mis hijos no me han llamado", sessionId: "s_imagen_triste" });
+  assert.equal(sad.body.data.user_emotion, "NEGATIVA_TRISTEZA_SOLEDAD");
+  assert.equal(sad.body.data.image_key, "acompanamiento", "no se muestra una familia feliz a quien la extraña");
+
+  const music = await callChat({ message: "me gusta escuchar boleros en la radio", sessionId: "s_imagen_musica" });
+  assert.equal(music.body.data.image_key, "musica");
+
+  for (const message of ["eh", "buenas tardes", "se me olvidó la pastilla", "estoy muy contento"]) {
+    const { body } = await callChat({ message, sessionId: "s_imagen_varias" });
+    assert.ok(SELECTABLE_IMAGE_KEYS.includes(body.data.image_key), `${message} -> ${body.data.image_key}`);
+  }
 });
 
 test("no repite la misma respuesta en turnos seguidos de una sesión", async () => {
@@ -232,6 +249,14 @@ test("companion es opcional y un valor desconocido no rompe la petición", async
     const { status, body } = await callChat({ message: "buenas tardes", sessionId: "s_companion", companion });
     assert.equal(status, 200, `companion=${companion}`);
     assert.equal(body.data.audio_base64, null);
+  }
+});
+
+test("cada variación del banco trae una imagen válida", () => {
+  for (const variations of Object.values(RESPONSE_VARIATIONS_BANK)) {
+    for (const { image_key, spoken_text } of variations) {
+      assert.ok(SELECTABLE_IMAGE_KEYS.includes(image_key), spoken_text);
+    }
   }
 });
 

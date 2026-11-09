@@ -1,0 +1,32 @@
+<!-- Ilustración original del banco local de imágenes (ContextImage, clave "calma"). -->
+<!-- Se puede sustituir por otra imagen con el mismo nombre de recurso sin tocar el código. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="240dp"
+    android:height="160dp"
+    android:viewportWidth="240"
+    android:viewportHeight="160">
+    <path
+        android:pathData="M58,76a62,62 0 1,0 124,0a62,62 0 1,0 -124,0Z"
+        android:fillColor="#DCEADF" />
+    <path
+        android:pathData="M74,76a46,46 0 1,0 92,0a46,46 0 1,0 -92,0Z"
+        android:fillColor="#C3DCCB" />
+    <path
+        android:pathData="M90,76a30,30 0 1,0 60,0a30,30 0 1,0 -60,0Z"
+        android:fillColor="#A5C9B1" />
+    <path
+        android:pathData="M120,44C146,56 148,92 120,110C92,92 94,56 120,44Z"
+        android:fillColor="#2E5C45" />
+    <path
+        android:pathData="M120,52V104M120,70L132,62M120,84L134,76M120,70L108,62M120,84L106,76"
+        android:strokeColor="#CFE3D5"
+        android:strokeWidth="2.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M60,148C75,140 90,156 105,148S135,140 150,148S165,156 180,148"
+        android:strokeColor="#8DB59A"
+        android:strokeWidth="4"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

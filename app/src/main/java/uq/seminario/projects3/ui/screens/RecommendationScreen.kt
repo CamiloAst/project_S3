@@ -46,9 +46,11 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uq.seminario.projects3.avatar.AssistantAvatar
+import uq.seminario.projects3.images.ContextImage
 import uq.seminario.projects3.ui.components.AppNavigationHeader
 import uq.seminario.projects3.ui.components.AssistantAvatarBadge
 import uq.seminario.projects3.ui.components.BasicControlsBar
+import uq.seminario.projects3.ui.components.ContextImageCard
 import uq.seminario.projects3.ui.theme.DarkText
 import uq.seminario.projects3.ui.theme.MutedDarkText
 import uq.seminario.projects3.ui.theme.PrimaryDarkGreen
@@ -68,6 +70,8 @@ private const val DEFAULT_RECOMMENDATION_SUBTITLE = "Inhala despacio y exhala su
  * Modelo CARE: Complementariedad (voz + resumen visual) y Equivalencia (responder por voz o con botones):
  * - Barra superior `AppNavigationHeader` con "← Atrás" e "🏠 Inicio".
  * - El avatar del acompañante muestra ondas mientras habla.
+ * - Una ilustración del banco local (`image`) acompaña el tema; con tristeza o preocupación el
+ *   backend nunca elige familia ni celebraciones (compañía o calma en su lugar).
  * - Muestra el apoyo visual corto (`screenText`) junto a la tarjeta de recomendación de bienestar.
  * - Footer limpio con "Pausar lectura / Continuar lectura" (y "Repetir") + botón "Hablar".
  */
@@ -78,6 +82,7 @@ fun RecommendationScreen(
     onTogglePause: () -> Unit,
     modifier: Modifier = Modifier,
     avatar: AssistantAvatar = AssistantAvatar.DEFAULT,
+    image: ContextImage = ContextImage.ACOMPANAMIENTO,
     recommendationTitle: String = DEFAULT_RECOMMENDATION_TITLE,
     recommendationSubtitle: String = DEFAULT_RECOMMENDATION_SUBTITLE,
     onRepeatClick: () -> Unit = {},
@@ -157,7 +162,7 @@ fun RecommendationScreen(
                 ) {
                     AssistantAvatarBadge(
                         avatar = avatar,
-                        avatarSize = 112.dp,
+                        avatarSize = 96.dp,
                         isSpeaking = !isPaused,
                         borderColor = SereneWarmCardSurface,
                         contentDescription = if (!isPaused) {
@@ -167,7 +172,16 @@ fun RecommendationScreen(
                         }
                     )
 
-                    Spacer(modifier = Modifier.height(10.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    ContextImageCard(
+                        image = image,
+                        imageHeight = 140.dp,
+                        containerColor = SereneWarmCardSurface,
+                        borderColor = SereneRecommendationBorder
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
 
                     Card(
                         modifier = Modifier.fillMaxWidth(),
@@ -324,6 +338,7 @@ private fun RecommendationScreenPreview() {
         RecommendationScreen(
             speechText = "Acompañamiento cálido en todo momento",
             isPaused = false,
+            image = ContextImage.CALMA,
             onTogglePause = {},
             onSpeakClick = {}
         )

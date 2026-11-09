@@ -41,13 +41,15 @@ data class ChatResponse(
  * Datos multimodales sincronizados del Modelo CARE devueltos por el backend,
  * incluyendo síntesis de voz neural en Base64 y reloj maestro de sincronía (audio_duration_ms).
  * Los textos nunca son nulos: los campos ausentes llegan como "" y el ViewModel aplica sus
- * valores por defecto.
+ * valores por defecto. `image_key` es la clave de la ilustración del banco local
+ * (ver `images/ContextImage.kt`).
  */
 data class ChatData(
     val spoken_text: String,
     val screen_text: String,
     val user_emotion: String,
     val suggested_action: String,
+    val image_key: String = "",
     val audio_base64: String? = null,
     val audio_duration_ms: Long? = null
 )
@@ -74,6 +76,8 @@ data class ChatDataDto(
     val userEmotion: String? = null,
     @SerializedName("suggested_action")
     val suggestedAction: String? = null,
+    @SerializedName("image_key")
+    val imageKey: String? = null,
     @SerializedName("audio_base64")
     val audioBase64: String? = null,
     @SerializedName("audio_duration_ms")
@@ -98,6 +102,7 @@ fun ChatResponseDto.toChatResponse(requestSessionId: String): ChatResponse? {
             screen_text = screen,
             user_emotion = raw.userEmotion?.trim().orEmpty(),
             suggested_action = raw.suggestedAction?.trim().orEmpty(),
+            image_key = raw.imageKey?.trim().orEmpty(),
             audio_base64 = raw.audioBase64?.takeIf { it.isNotBlank() },
             audio_duration_ms = raw.audioDurationMs
         )

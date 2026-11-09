@@ -49,11 +49,15 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uq.seminario.projects3.avatar.AssistantAvatar
+import uq.seminario.projects3.images.ContextImage
 import uq.seminario.projects3.ui.components.AppNavigationHeader
 import uq.seminario.projects3.ui.components.AssistantAvatarBadge
 import uq.seminario.projects3.ui.components.BasicControlsBar
+import uq.seminario.projects3.ui.components.ContextImageCard
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.CardSurface
+import uq.seminario.projects3.ui.theme.ContextImageBorder
+import uq.seminario.projects3.ui.theme.ContextImageSurface
 import uq.seminario.projects3.ui.theme.DarkText
 import uq.seminario.projects3.ui.theme.MutedDarkText
 import uq.seminario.projects3.ui.theme.PrimaryDarkGreen
@@ -72,6 +76,7 @@ private const val SERENE_RECOMMENDATION_TITLE = "Un lugar sereno para respirar c
  * Modelo CARE: Complementariedad (la voz lee `spoken_text` y la pantalla muestra un resumen distinto):
  * - Barra superior `AppNavigationHeader` con "← Atrás" e "🏠 Inicio".
  * - El avatar del acompañante "habla": ondas a su alrededor mientras suena la voz.
+ * - Una ilustración del banco local (`image`) muestra el tema de la conversación.
  * - Muestra únicamente `screen_text` en pantalla para evitar sobrecarga cognitiva mientras TTS lee `spoken_text`.
  * - Footer limpio acorde a los mockups con "Pausar lectura / Continuar lectura" (y "Repetir") + "Hablar".
  */
@@ -83,6 +88,7 @@ fun BotResponseScreen(
     modifier: Modifier = Modifier,
     avatar: AssistantAvatar = AssistantAvatar.DEFAULT,
     userEmotion: String = "NEUTRA",
+    image: ContextImage = ContextImage.DEFAULT,
     onRepeatClick: () -> Unit = {},
     onBackClick: () -> Unit = {},
     onHomeClick: () -> Unit = {},
@@ -150,6 +156,7 @@ fun BotResponseScreen(
                 ) {
                     AssistantAvatarBadge(
                         avatar = avatar,
+                        avatarSize = 100.dp,
                         isSpeaking = !isPaused,
                         borderColor = if (isAffectiveSupport) SereneWarmCardSurface else CardSurface,
                         contentDescription = if (!isPaused) {
@@ -157,6 +164,15 @@ fun BotResponseScreen(
                         } else {
                             "La voz de ${avatar.title.lowercase()} está en pausa"
                         }
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    ContextImageCard(
+                        image = image,
+                        imageHeight = 140.dp,
+                        containerColor = if (isAffectiveSupport) SereneWarmCardSurface else ContextImageSurface,
+                        borderColor = if (isAffectiveSupport) SereneRecommendationBorder else ContextImageBorder
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))
@@ -395,6 +411,7 @@ private fun BotResponseScreenSpeakingPreview() {
         BotResponseScreen(
             speechText = "Aquí para conversar contigo",
             isPaused = false,
+            image = ContextImage.MUSICA,
             onTogglePause = {},
             onSpeakClick = {}
         )

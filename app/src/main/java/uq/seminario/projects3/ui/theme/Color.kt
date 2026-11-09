@@ -36,3 +36,7 @@ val SereneCalmAccent = Color(0xFF2B5B46)
 
 // Acompañante (avatar): ondas lavanda, a juego con el fondo de las imágenes, mientras habla
 val AvatarSpeakingWave = Color(0xFF7C6BB4)
+
+// Ilustración del banco local que acompaña cada respuesta (fondo salvia muy suave)
+val ContextImageSurface = Color(0xFFEDF3EE)
+val ContextImageBorder = Color(0xFFCADBCF)

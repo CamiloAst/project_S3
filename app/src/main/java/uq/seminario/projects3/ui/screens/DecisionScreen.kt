@@ -46,8 +46,10 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uq.seminario.projects3.avatar.AssistantAvatar
+import uq.seminario.projects3.images.ContextImage
 import uq.seminario.projects3.ui.components.AppNavigationHeader
 import uq.seminario.projects3.ui.components.AssistantAvatarBadge
+import uq.seminario.projects3.ui.components.ContextImageCard
 import uq.seminario.projects3.ui.theme.ActionDarkBlue
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.DarkText
@@ -61,7 +63,8 @@ import uq.seminario.projects3.ui.theme.SereneWarmBackground
  *
  * Aplica los principios de accesibilidad gerontológica y el diseño original de los mockups:
  * - Barra superior `AppNavigationHeader` con "← Atrás" e "🏠 Inicio".
- * - Avatar del acompañante que hace la pregunta (ondas mientras la lee en voz alta).
+ * - Avatar del acompañante que hace la pregunta (ondas mientras la lee en voz alta) y, a su
+ *   lado, la ilustración del tema (`image`): da contexto a la decisión sin quitar alto a los botones.
  * - Pregunta grande, directa y visible (>=28sp).
  * - Dos botones rectangulares masivos con alto contraste ("Sí" y "No").
  * - Principio de Equivalencia: Botón inferior "Responder hablando".
@@ -80,6 +83,7 @@ fun DecisionScreen(
     avatar: AssistantAvatar = AssistantAvatar.DEFAULT,
     isAvatarSpeaking: Boolean = false,
     userEmotion: String = "NEUTRA",
+    image: ContextImage = ContextImage.DEFAULT,
     onBackClick: () -> Unit = {},
     onHomeClick: () -> Unit = {}
 ) {
@@ -121,16 +125,31 @@ fun DecisionScreen(
                     onHomeClick = onHomeClick
                 )
 
-                AssistantAvatarBadge(
-                    avatar = avatar,
-                    avatarSize = 88.dp,
-                    isSpeaking = isAvatarSpeaking,
-                    contentDescription = if (isAvatarSpeaking) {
-                        "${avatar.title} te está preguntando en voz alta"
-                    } else {
-                        "${avatar.title} espera tu respuesta"
-                    }
-                )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    AssistantAvatarBadge(
+                        avatar = avatar,
+                        avatarSize = 84.dp,
+                        isSpeaking = isAvatarSpeaking,
+                        contentDescription = if (isAvatarSpeaking) {
+                            "${avatar.title} te está preguntando en voz alta"
+                        } else {
+                            "${avatar.title} espera tu respuesta"
+                        }
+                    )
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    ContextImageCard(
+                        image = image,
+                        imageHeight = 96.dp,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(6.dp))
 
                 DecisionTitleSection(question = question)
             }
