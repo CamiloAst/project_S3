@@ -110,9 +110,11 @@ tasks.matching { it.name == "preReleaseBuild" }.configureEach {
     }
 }
 
-// EmergencyDetectorTest lee los casos compartidos con el backend: se declaran como entrada
-// para que la prueba vuelva a ejecutarse cuando cambien.
+// EmergencyDetectorTest y ContextImageTest leen datos compartidos con el backend: se declaran
+// como entrada para que las pruebas vuelvan a ejecutarse cuando cambien.
 tasks.withType<Test>().configureEach {
     inputs.file(rootProject.layout.projectDirectory.file("backend/test/emergency-cases.json"))
         .withPropertyName("sharedEmergencyCases")
+    inputs.file(rootProject.layout.projectDirectory.file("backend/test/image-keys.json"))
+        .withPropertyName("sharedImageKeys")
 }

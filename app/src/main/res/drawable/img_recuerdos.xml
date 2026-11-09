@@ -1,0 +1,64 @@
+<!-- Ilustración original del banco local de imágenes (ContextImage, clave "recuerdos"). -->
+<!-- Se puede sustituir por otra imagen con el mismo nombre de recurso sin tocar el código. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="240dp"
+    android:height="160dp"
+    android:viewportWidth="240"
+    android:viewportHeight="160">
+    <path
+        android:pathData="M34,146a88,7 0 1,0 176,0a88,7 0 1,0 -176,0Z"
+        android:fillColor="#2E5C45"
+        android:fillAlpha="0.1" />
+    <group android:rotation="-9" android:pivotX="96" android:pivotY="84">
+        <path
+            android:pathData="M62,38h68a4,4 0 0,1 4,4v84a4,4 0 0,1 -4,4h-68a4,4 0 0,1 -4,-4v-84a4,4 0 0,1 4,-4Z"
+            android:fillColor="#FFFFFF" />
+        <path
+            android:pathData="M62,38h68a4,4 0 0,1 4,4v84a4,4 0 0,1 -4,4h-68a4,4 0 0,1 -4,-4v-84a4,4 0 0,1 4,-4Z"
+            android:strokeColor="#D9D4C7"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M66,44h60a2,2 0 0,1 2,2v58a2,2 0 0,1 -2,2h-60a2,2 0 0,1 -2,-2v-58a2,2 0 0,1 2,-2Z"
+            android:fillColor="#EBD6B8" />
+        <path
+            android:pathData="M105,60a7,7 0 1,0 14,0a7,7 0 1,0 -14,0Z"
+            android:fillColor="#FFF1DA" />
+        <path
+            android:pathData="M64,106L86,74L100,92L112,80L128,106Z"
+            android:fillColor="#B98157" />
+    </group>
+    <group android:rotation="8" android:pivotX="150" android:pivotY="86">
+        <path
+            android:pathData="M116,40h68a4,4 0 0,1 4,4v84a4,4 0 0,1 -4,4h-68a4,4 0 0,1 -4,-4v-84a4,4 0 0,1 4,-4Z"
+            android:fillColor="#FFFFFF" />
+        <path
+            android:pathData="M116,40h68a4,4 0 0,1 4,4v84a4,4 0 0,1 -4,4h-68a4,4 0 0,1 -4,-4v-84a4,4 0 0,1 4,-4Z"
+            android:strokeColor="#D9D4C7"
+            android:strokeWidth="2"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M120,46h60a2,2 0 0,1 2,2v58a2,2 0 0,1 -2,2h-60a2,2 0 0,1 -2,-2v-58a2,2 0 0,1 2,-2Z"
+            android:fillColor="#D9D2EE" />
+        <path
+            android:pathData="M128,108V91Q128,79 140,79H140Q152,79 152,91V108Z"
+            android:fillColor="#6F5A8E" />
+        <path
+            android:pathData="M132,68a8,8 0 1,0 16,0a8,8 0 1,0 -16,0Z"
+            android:fillColor="#6F5A8E" />
+        <path
+            android:pathData="M150,108V93Q150,81 162,81H162Q174,81 174,93V108Z"
+            android:fillColor="#6F5A8E" />
+        <path
+            android:pathData="M154,70a8,8 0 1,0 16,0a8,8 0 1,0 -16,0Z"
+            android:fillColor="#6F5A8E" />
+        <path
+            android:pathData="M125.5,116h37a1.5,1.5 0 0,1 1.5,1.5v0a1.5,1.5 0 0,1 -1.5,1.5h-37a1.5,1.5 0 0,1 -1.5,-1.5v0a1.5,1.5 0 0,1 1.5,-1.5Z"
+            android:fillColor="#D9D4C7" />
+    </group>
+    <path
+        android:pathData="M202,45.2C192,38.4 194.4,30.4 202,34.8C209.6,30.4 212,38.4 202,45.2Z"
+        android:fillColor="#D9776A" />
+</vector>

@@ -1,0 +1,38 @@
+<!-- Ilustración original del banco local de imágenes (ContextImage, clave "clima"). -->
+<!-- Se puede sustituir por otra imagen con el mismo nombre de recurso sin tocar el código. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="240dp"
+    android:height="160dp"
+    android:viewportWidth="240"
+    android:viewportHeight="160">
+    <path
+        android:pathData="M127,58L135,58M121.08,76.22L127.55,80.92M105.58,87.48L108.05,95.09M86.42,87.48L83.95,95.09M70.92,76.22L64.45,80.92M65,58L57,58M70.92,39.78L64.45,35.08M86.42,28.52L83.95,20.91M105.58,28.52L108.05,20.91M121.08,39.78L127.55,35.08"
+        android:strokeColor="#E5B53C"
+        android:strokeWidth="3.5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M72,58a24,24 0 1,0 48,0a24,24 0 1,0 -48,0Z"
+        android:fillColor="#E5B53C" />
+    <path
+        android:pathData="M104,86a20,20 0 1,0 40,0a20,20 0 1,0 -40,0Z"
+        android:fillColor="#CFDDEB" />
+    <path
+        android:pathData="M123,74a26,26 0 1,0 52,0a26,26 0 1,0 -52,0Z"
+        android:fillColor="#CFDDEB" />
+    <path
+        android:pathData="M157,88a18,18 0 1,0 36,0a18,18 0 1,0 -36,0Z"
+        android:fillColor="#CFDDEB" />
+    <path
+        android:pathData="M120,84h62a12,12 0 0,1 12,12v0a12,12 0 0,1 -12,12h-62a12,12 0 0,1 -12,-12v0a12,12 0 0,1 12,-12Z"
+        android:fillColor="#CFDDEB" />
+    <path
+        android:pathData="M130,118C132.1,122.2 134.5,124.6 134.5,126.7C134.5,129.4 132.4,131.2 130,131.2C127.6,131.2 125.5,129.4 125.5,126.7C125.5,124.6 127.9,122.2 130,118Z"
+        android:fillColor="#6F9FC8" />
+    <path
+        android:pathData="M152,126C154.1,130.2 156.5,132.6 156.5,134.7C156.5,137.4 154.4,139.2 152,139.2C149.6,139.2 147.5,137.4 147.5,134.7C147.5,132.6 149.9,130.2 152,126Z"
+        android:fillColor="#6F9FC8" />
+    <path
+        android:pathData="M174,118C176.1,122.2 178.5,124.6 178.5,126.7C178.5,129.4 176.4,131.2 174,131.2C171.6,131.2 169.5,129.4 169.5,126.7C169.5,124.6 171.9,122.2 174,118Z"
+        android:fillColor="#6F9FC8" />
+</vector>

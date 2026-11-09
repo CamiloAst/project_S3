@@ -1,0 +1,30 @@
+{
+  "_comment": "Claves del banco local de imágenes. Las leen backend/test/imageCatalog.test.js y app/src/test/.../images/ContextImageTest.kt para que el backend y la app no se desincronicen.",
+  "selectable": [
+    "salud",
+    "agenda",
+    "familia",
+    "mascotas",
+    "musica",
+    "lectura",
+    "comida",
+    "naturaleza",
+    "espiritualidad",
+    "descanso",
+    "clima",
+    "recuerdos",
+    "alegria",
+    "calma",
+    "acompanamiento",
+    "escucha",
+    "saludo"
+  ],
+  "emergency": "ayuda_cercana",
+  "defaultsByEmotion": {
+    "POSITIVA": "alegria",
+    "NEGATIVA_TRISTEZA_SOLEDAD": "acompanamiento",
+    "NEGATIVA_ANSIEDAD_PREOCUPACION": "calma",
+    "NEUTRA": "saludo",
+    "AMBIGUA": "escucha"
+  }
+}

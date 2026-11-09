@@ -8,9 +8,9 @@ API RESTful desarrollada con **Node.js**, **Express**, **Google Gemini (SDK ofic
 
 La respuesta de la API está pensada para que la app Android combine sus modalidades según el **Modelo CARE**:
 
-* **C - Complementariedad:** `spoken_text` (voz) y `screen_text` (pantalla) se complementan: la voz da la respuesta completa y la pantalla un resumen corto de 4 a 7 palabras que nunca es copia literal.
+* **C - Complementariedad:** `spoken_text` (voz) y `screen_text` (pantalla) se complementan: la voz da la respuesta completa y la pantalla un resumen corto de 4 a 7 palabras que nunca es copia literal. `image_key` añade una ilustración del tema de la conversación tomada del banco local de la app.
 * **A - Asignación:** cada tarea va a la modalidad más eficiente; `suggested_action` indica a la app cuándo pasar la interacción a la pantalla (botones Sí/No, aclaración, alerta).
-* **R - Redundancia:** los mensajes críticos (p. ej. `emergency_alert`) se entregan a la vez en voz y en pantalla para evitar errores de comprensión.
+* **R - Redundancia:** los mensajes críticos (p. ej. `emergency_alert`) se entregan a la vez en voz, en pantalla y con una imagen fija (`ayuda_cercana`) para evitar errores de comprensión.
 * **E - Equivalencia:** el usuario puede responder por voz o tocando la pantalla; el backend recibe el mismo texto sin importar el canal.
 
 ### Pautas conversacionales del asistente
@@ -117,6 +117,7 @@ Si `API_ACCESS_TOKEN` está definido (obligatorio en producción), todas las rut
     "spoken_text": "Lamento mucho que hoy se sienta tan silencioso el día y extrañes la llamada de tus hijos. Quiero que sepas que estoy aquí contigo para acompañarte con toda calma. ¿Te gustaría que platiquemos de algún recuerdo bonito junto a ellos?",
     "screen_text": "Acompañamiento cálido en todo momento",
     "suggested_action": "continue",
+    "image_key": "acompanamiento",
     "audio_base64": "//NExAAAAANIAAAAAExBTUUzLjEwMKqqqqqq...",
     "audio_duration_ms": 13450
   }
@@ -130,6 +131,7 @@ Si `API_ACCESS_TOKEN` está definido (obligatorio en producción), todas las rut
 | `screen_text` | `string` | **Pantalla** | Resumen o título complementario corto (**4 a 7 palabras**, nunca copia literal de `spoken_text`). |
 | `user_emotion` | `string` | **Emoción / Prosodia** | Categoría emocional clasificada por Gemini (o por el detector de respaldo): `POSITIVA`, `NEGATIVA_TRISTEZA_SOLEDAD`, `NEGATIVA_ANSIEDAD_PREOCUPACION`, `NEUTRA`, `AMBIGUA`. Modula la prosodia del TTS y la UI en Android. |
 | `suggested_action` | `string` | **Control UI** | `continue` (charla normal), `show_decision_buttons` (botones accesibles Sí/No), `clarify` (pedir aclaración amable), `emergency_alert` (pantalla de alerta de posible emergencia; sin llamadas ni avisos en el ambiente de pruebas). |
+| `image_key` | `string` | **Imagen (pantalla)** | Clave de la ilustración del banco local de la app (`res/drawable/img_<clave>.xml`); no viaja ninguna imagen. Gemini la elige de un `enum` (`salud`, `agenda`, `familia`, `mascotas`, `musica`, `lectura`, `comida`, `naturaleza`, `espiritualidad`, `descanso`, `clima`, `recuerdos`, `alegria`, `calma`, `acompanamiento`, `escucha`, `saludo`); sin Gemini sale del tema del mensaje o de la emoción. `ayuda_cercana` está reservada a `emergency_alert`. Con tristeza o preocupación nunca se usan `familia` ni `alegria`. Ver `services/imageCatalog.js`. |
 | `audio_base64` | `string \| null` | **Audio Neural** | MP3 (24 kHz, 48 kbps mono) codificado en Base64 generado con `msedge-tts` (voz según `companion`), o `null` si aplica fallback al TTS local de Android. |
 | `audio_duration_ms` | `number` | **Reloj Maestro** | Duración estimada/exacta del audio en milisegundos para sincronizar la interfaz. |
 

@@ -15,6 +15,7 @@ import uq.seminario.projects3.BuildConfig
 import uq.seminario.projects3.audio.AudioEngine
 import uq.seminario.projects3.avatar.AssistantAvatar
 import uq.seminario.projects3.avatar.AvatarPreferences
+import uq.seminario.projects3.images.ContextImage
 import uq.seminario.projects3.network.ChatApiClient
 import uq.seminario.projects3.network.ChatData
 import uq.seminario.projects3.safety.EmergencyDetector
@@ -46,16 +47,19 @@ sealed interface UiState {
      * Es transitorio como `Listening`: nunca se guarda en el historial de navegación.
      */
     data object Thinking : UiState
+    /** `image`: ilustración del banco local que acompaña la respuesta (Complementariedad). */
     data class Speaking(
         val screenText: String = "Aquí para conversar contigo",
         val spokenText: String = "Qué gusto saludarte. Estoy aquí para conversar contigo con calma sobre lo que quieras. ¿Cómo va tu día?",
         val userEmotion: String = "NEUTRA",
-        val isPaused: Boolean = false
+        val isPaused: Boolean = false,
+        val image: ContextImage = ContextImage.DEFAULT
     ) : UiState
     data class AwaitingDecision(
         val question: String = "¿Quieres continuar con la conversación?",
         val spokenText: String = "Aquí estoy para acompañarte en lo que necesites. ¿Quieres continuar con nuestra charla en este momento?",
         val userEmotion: String = "NEUTRA",
+        val image: ContextImage = ContextImage.DEFAULT,
         val confirmOption: DecisionOption = DecisionOption(
             title = "Sí",
             subtitle = "Seguir hablando con tu asistente"
@@ -72,6 +76,7 @@ sealed interface UiState {
     /**
      * Alerta de posible emergencia (`suggested_action = "emergency_alert"`).
      * Ambiente de pruebas: solo informa al usuario; no llama ni avisa a nadie.
+     * Su imagen es siempre `ContextImage.AYUDA_CERCANA` (Redundancia), por eso no la guarda.
      */
     data class Emergency(
         val screenText: String = EMERGENCY_SCREEN_TEXT,
@@ -584,6 +589,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
             "Estamos aquí contigo para acompañarte"
         }
         val screenText = data.screen_text.ifBlank { defaultScreenText }
+        // Ilustración del banco local: la que eligió el backend o, si no sirve, la de la emoción
+        val image = ContextImage.resolve(data.image_key, emotion, action)
 
         val pausedState = startsPaused()
         _isPaused.value = pausedState
@@ -598,7 +605,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                     UiState.AwaitingDecision(
                         question = screenText.ifBlank { "¿Quieres continuar con la conversación?" },
                         spokenText = spokenText,
-                        userEmotion = emotion
+                        userEmotion = emotion,
+                        image = image
                     )
                 )
             }
@@ -608,7 +616,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                         screenText = screenText,
                         spokenText = spokenText,
                         userEmotion = emotion,
-                        isPaused = pausedState
+                        isPaused = pausedState,
+                        image = image
                     )
                 )
             }
@@ -879,7 +888,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                     spoken_text = UiState.EMERGENCY_SPOKEN_TEXT,
                     screen_text = UiState.EMERGENCY_SCREEN_TEXT,
                     user_emotion = "NEGATIVA_ANSIEDAD_PREOCUPACION",
-                    suggested_action = "emergency_alert"
+                    suggested_action = "emergency_alert",
+                    image_key = ContextImage.AYUDA_CERCANA.apiValue
                 )
             }
             lower.contains("preocupad") || lower.contains("ansios") || lower.contains("olvid") ||
@@ -890,14 +900,16 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                         spoken_text = "Vamos a tomar las cosas con mucha calma, paso a paso, sin ninguna prisa. Juntos podemos organizar tus citas y medicinas del día con tranquilidad. ¿Quieres que las revisemos ahora?",
                         screen_text = "Organizando tus pendientes paso a paso",
                         user_emotion = "NEGATIVA_ANSIEDAD_PREOCUPACION",
-                        suggested_action = "show_decision_buttons"
+                        suggested_action = "show_decision_buttons",
+                        image_key = ContextImage.AGENDA.apiValue
                     )
                 } else {
                     ChatData(
                         spoken_text = "Respira profundo y suelta el aire despacio; todo está bajo control. Para tus medicinas y citas médicas siempre seguimos el orden que dejó indicado tu doctor. ¿Te gustaría verificar tu agenda?",
                         screen_text = "Tranquilidad y orden en tu agenda",
                         user_emotion = "NEGATIVA_ANSIEDAD_PREOCUPACION",
-                        suggested_action = "show_decision_buttons"
+                        suggested_action = "show_decision_buttons",
+                        image_key = ContextImage.CALMA.apiValue
                     )
                 }
             }
@@ -908,14 +920,16 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                         spoken_text = "Comprendo que hoy el día se sienta silencioso para ti. Quiero que tengas la certeza de que estoy aquí a tu lado para escucharte sin prisa. ¿Te gustaría recordar algún momento bonito?",
                         screen_text = "Un lugar sereno para respirar",
                         user_emotion = "NEGATIVA_TRISTEZA_SOLEDAD",
-                        suggested_action = "continue"
+                        suggested_action = "continue",
+                        image_key = ContextImage.ACOMPANAMIENTO.apiValue
                     )
                 } else {
                     ChatData(
                         spoken_text = "Lamento mucho que estés pasando por este rato de nostalgia. Es natural extrañar la compañía, pero cuentas conmigo para charlar con calma. Respiremos juntos despacio.",
                         screen_text = "Acompañamiento cálido en todo momento",
                         user_emotion = "NEGATIVA_TRISTEZA_SOLEDAD",
-                        suggested_action = "continue"
+                        suggested_action = "continue",
+                        image_key = ContextImage.CALMA.apiValue
                     )
                 }
             }
@@ -925,7 +939,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                     spoken_text = "Qué alegría escuchar que estás pasando un momento tan agradable hoy. Disfrutar de estas cosas buenas llena el corazón de energía. ¿Qué ha sido lo que más te ha gustado de tu día?",
                     screen_text = "Celebrando tu bienestar y alegría hoy",
                     user_emotion = "POSITIVA",
-                    suggested_action = "continue"
+                    suggested_action = "continue",
+                    image_key = if (lower.contains("niet") || lower.contains("familia")) ContextImage.FAMILIA.apiValue else ContextImage.ALEGRIA.apiValue
                 )
             }
             lower.contains("no sé") || lower.contains("no se") || lower.contains("tal vez") ||
@@ -934,7 +949,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                     spoken_text = "Disculpa, creo que tu mensaje fue muy breve y quiero asegurarme de comprenderte bien. Tómate todo el tiempo que necesites para contármelo con más detalle. ¿A qué tema te refieres?",
                     screen_text = "Cuéntame un poco más de detalle",
                     user_emotion = "AMBIGUA",
-                    suggested_action = "clarify"
+                    suggested_action = "clarify",
+                    image_key = ContextImage.ESCUCHA.apiValue
                 )
             }
             else -> {
@@ -942,7 +958,8 @@ class ChatbotViewModel(application: Application) : AndroidViewModel(application)
                     spoken_text = "Qué gusto saludarte y compartir este momento de conversación contigo. Estoy aquí para escucharte con toda calma sobre lo que quieras platicar. ¿Cómo ha estado tu jornada?",
                     screen_text = "Aquí para conversar contigo con calma",
                     user_emotion = "NEUTRA",
-                    suggested_action = "continue"
+                    suggested_action = "continue",
+                    image_key = ContextImage.SALUDO.apiValue
                 )
             }
         }

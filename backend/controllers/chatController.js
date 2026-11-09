@@ -15,6 +15,8 @@
  * 7. Guardrails éticos (prescripción médica) Post-LLM.
  * 8. Sesiones persistentes mediante services/sessionStore.js: ventana de historial
  *    (SESSION_MAX_MESSAGES) y memoria resumida que Gemini reescribe en cada turno.
+ * 9. Imagen contextual (image_key) de un banco local de la app (services/imageCatalog.js):
+ *    Gemini elige la clave; sin Gemini, el tema del mensaje o la emoción.
  */
 
 const { GoogleGenAI, Type } = require("@google/genai");
@@ -31,6 +33,14 @@ const {
 } = require("../services/ttsService");
 const { sessionStore } = require("../services/sessionStore");
 const { isCriticalRisk } = require("../services/emergencyDetector");
+const {
+  SELECTABLE_IMAGE_KEYS,
+  EMERGENCY_IMAGE_KEY,
+  MEDICAL_GUARDRAIL_IMAGE_KEY,
+  detectImageTopic,
+  resolveImageKey,
+  buildImagePromptGuide
+} = require("../services/imageCatalog");
 
 const DEFAULT_GEMINI_MODEL = "gemini-3.5-flash";
 const GEMINI_MODEL = (process.env.GEMINI_MODEL || DEFAULT_GEMINI_MODEL).trim();
@@ -368,6 +378,8 @@ function detectAffectiveSituation(text) {
 //    Regla: screen_text corto complementario (4-7 palabras, NO copia literal).
 //    Cuando el asistente habla de sí no usa palabras con género ("listo", "atento"):
 //    el mismo texto sirve para la compañera y para el compañero.
+//    image_key ilustra lo que dice cada variación; en el respaldo tiene prioridad el tema
+//    que mencionó el usuario (ver handleChat y services/imageCatalog.js).
 // =============================================================================
 const RESPONSE_VARIATIONS_BANK = {
   POSITIVA: [
@@ -375,37 +387,43 @@ const RESPONSE_VARIATIONS_BANK = {
       spoken_text: "Qué alegría escuchar que estás pasando un momento tan agradable hoy. Disfrutar de estas cosas buenas llena el corazón de energía y bienestar. ¿Qué ha sido lo que más te ha gustado de tu día?",
       screen_text: "Celebrando tu bienestar y alegría hoy",
       user_emotion: "POSITIVA",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "alegria"
     },
     {
       spoken_text: "Me da muchísimo gusto saber que te sientes con tan buen ánimo. Es maravilloso valorar esos instantes especiales que nos regala la vida cotidiana. ¿Te gustaría contarme algún detalle más sobre eso?",
       screen_text: "Compartiendo tus buenos momentos del día",
       user_emotion: "POSITIVA",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "alegria"
     },
     {
       spoken_text: "Escucharte así de motivado y contento me alegra mucho la jornada. Esos momentos de tranquilidad y dicha merecen disfrutarse con toda calma. ¿Tienes pensado hacer algo especial más tarde?",
       screen_text: "Energía positiva para disfrutar la jornada",
       user_emotion: "POSITIVA",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "alegria"
     },
     {
       spoken_text: "Qué bonita noticia me compartes en este momento. Sentirse agradecido y rodeado de buenos recuerdos fortalece mucho el espíritu. ¿Quieres que sigamos conversando sobre ello?",
       screen_text: "Recuerdos gratos que fortalecen el ánimo",
       user_emotion: "POSITIVA",
-      suggested_action: "show_decision_buttons"
+      suggested_action: "show_decision_buttons",
+      image_key: "recuerdos"
     },
     {
       spoken_text: "Es excelente saber que todo marcha tan bien por allá. Cuando uno logra sus propósitos o comparte con seres queridos, el día brilla distinto. ¿Qué otra actividad disfrutas hacer cuando estás así de contento?",
       screen_text: "Un día lleno de logros",
       user_emotion: "POSITIVA",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "alegria"
     },
     {
       spoken_text: "Me encanta notar esa serenidad y entusiasmo en tus palabras. Conservar ese buen humor es un gran regalo para tu salud y tranquilidad. ¿Deseas compartir alguna otra anécdota conmigo?",
       screen_text: "Tu entusiasmo ilumina nuestra conversación hoy",
       user_emotion: "POSITIVA",
-      suggested_action: "show_decision_buttons"
+      suggested_action: "show_decision_buttons",
+      image_key: "alegria"
     }
   ],
 
@@ -414,37 +432,43 @@ const RESPONSE_VARIATIONS_BANK = {
       spoken_text: "Comprendo que hoy el día se sienta silencioso y un poco pesado para ti. Quiero que tengas la certeza de que estoy aquí a tu lado para escucharte sin ninguna prisa. ¿Te gustaría que recordemos juntos algún momento bonito de tu vida?",
       screen_text: "Un lugar sereno para respirar",
       user_emotion: "NEGATIVA_TRISTEZA_SOLEDAD",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "acompanamiento"
     },
     {
       spoken_text: "Lamento mucho que estés pasando por este rato de nostalgia y desánimo. Es completamente natural extrañar la compañía de la familia en ciertos momentos. Respiremos despacio un instante y platícame de algún lugar que te traiga paz.",
       screen_text: "Acompañamiento cálido en todo momento",
       user_emotion: "NEGATIVA_TRISTEZA_SOLEDAD",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "calma"
     },
     {
       spoken_text: "Te escucho con mucha atención y valoro que me compartas cómo te sientes hoy. Aunque la casa esté callada ahora, cuentas con mi compañía para charlar de lo que tú prefieras. ¿Quieres que conversemos de música o de algún recuerdo agradable?",
       screen_text: "Conversación tranquila para sentirte acompañado",
       user_emotion: "NEGATIVA_TRISTEZA_SOLEDAD",
-      suggested_action: "show_decision_buttons"
+      suggested_action: "show_decision_buttons",
+      image_key: "acompanamiento"
     },
     {
       spoken_text: "Entiendo perfectamente ese sentimiento de vacío cuando las horas parecen avanzar lento. No tienes que llevar este momento en silencio, porque aquí estoy contigo para hacerte compañía. ¿Qué canción o melodía de tu juventud suele animarte el corazón?",
       screen_text: "Recordando melodías que alegran el alma",
       user_emotion: "NEGATIVA_TRISTEZA_SOLEDAD",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "musica"
     },
     {
       spoken_text: "Es muy válido sentirse cansado o nostálgico de vez en cuando. Permítete tomar un respiro profundo mientras conversamos con mucha calma y serenidad. ¿Te parece bien si platicamos un ratito más para distraer la mente?",
       screen_text: "Pausa serena para calmar el corazón",
       user_emotion: "NEGATIVA_TRISTEZA_SOLEDAD",
-      suggested_action: "show_decision_buttons"
+      suggested_action: "show_decision_buttons",
+      image_key: "calma"
     },
     {
       spoken_text: "Siento mucho que hoy te invada la tristeza, pero me alegra que hayas decidido hablar conmigo. Tu voz y tus historias son muy valiosas en este espacio. Cuéntame, ¿cuál era tu paseo favorito hace algunos años?",
       screen_text: "Tus historias siempre son muy valiosas",
       user_emotion: "NEGATIVA_TRISTEZA_SOLEDAD",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "recuerdos"
     }
   ],
 
@@ -453,37 +477,43 @@ const RESPONSE_VARIATIONS_BANK = {
       spoken_text: "Vamos a tomar las cosas con mucha calma, paso a paso, sin ninguna prisa. Es muy común olvidar algún pendiente, pero juntos podemos organizar tus actividades del día con tranquilidad. ¿Quieres que revisemos ahora tus citas o medicamentos programados?",
       screen_text: "Organizando tus pendientes paso a paso",
       user_emotion: "NEGATIVA_ANSIEDAD_PREOCUPACION",
-      suggested_action: "show_decision_buttons"
+      suggested_action: "show_decision_buttons",
+      image_key: "agenda"
     },
     {
       spoken_text: "Respira profundo por la nariz y suelta el aire despacio; todo está bajo control en este momento. Para tus medicinas y citas médicas siempre seguimos el orden que dejó indicado tu doctor. ¿Te gustaría verificar qué tienes anotado en tu agenda de hoy?",
       screen_text: "Tranquilidad y orden en tu agenda",
       user_emotion: "NEGATIVA_ANSIEDAD_PREOCUPACION",
-      suggested_action: "show_decision_buttons"
+      suggested_action: "show_decision_buttons",
+      image_key: "calma"
     },
     {
       spoken_text: "Comprendo que te sientas inquieto por ese pendiente, pero no tienes de qué angustiarte. Podemos repasar con claridad los horarios para que te quedes completamente tranquilo. Cuéntame, ¿la duda que tienes es sobre una cita médica o tu pastilla?",
       screen_text: "Repasemos juntos tus horarios del día",
       user_emotion: "NEGATIVA_ANSIEDAD_PREOCUPACION",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "agenda"
     },
     {
       spoken_text: "No te preocupes si algo se te pasó por alto hace un momento, eso nos ocurre a todos. Lo importante es que estás bien y podemos poner en orden cada tarea una por una. ¿Prefieres que primero miremos la hora de tu próximo compromiso?",
       screen_text: "Calma y claridad para tus actividades",
       user_emotion: "NEGATIVA_ANSIEDAD_PREOCUPACION",
-      suggested_action: "show_decision_buttons"
+      suggested_action: "show_decision_buttons",
+      image_key: "agenda"
     },
     {
       spoken_text: "Entiendo tu preocupación y estoy aquí para ayudarte a resolverla con serenidad. Recuerda tener a mano tu pastillero y un vaso con agua según las indicaciones de tu médico. ¿Qué te parece si repasamos qué actividad sigue en tu tarde?",
       screen_text: "Apoyo seguro para cuidar tu bienestar",
       user_emotion: "NEGATIVA_ANSIEDAD_PREOCUPACION",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "salud"
     },
     {
       spoken_text: "Deja que esa inquietud vaya bajando poco a poco mientras conversamos con calma. Aquí tenemos tiempo suficiente para aclarar cualquier confusión sobre tus horarios o pendientes. ¿Deseas que confirmemos juntos tu próxima cita de control?",
       screen_text: "Revisando tus compromisos con total calma",
       user_emotion: "NEGATIVA_ANSIEDAD_PREOCUPACION",
-      suggested_action: "show_decision_buttons"
+      suggested_action: "show_decision_buttons",
+      image_key: "agenda"
     }
   ],
 
@@ -492,37 +522,43 @@ const RESPONSE_VARIATIONS_BANK = {
       spoken_text: "Qué gusto saludarte y compartir este momento de conversación contigo. Estoy aquí para escucharte con toda calma sobre cualquier tema que quieras platicar hoy. ¿Cómo ha estado transcurriendo tu jornada hasta ahora?",
       screen_text: "Aquí para conversar contigo con calma",
       user_emotion: "NEUTRA",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "saludo"
     },
     {
       spoken_text: "Me alegra mucho escucharte por aquí en este día. Siempre es un buen momento para charlar tranquilamente de las noticias, el clima o tus intereses. ¿Sobre qué tema te apetece que platiquemos ahora?",
       screen_text: "Un buen momento para charlar juntos",
       user_emotion: "NEUTRA",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "saludo"
     },
     {
       spoken_text: "Recibe un saludo muy cordial de mi parte. Aquí tienes un espacio tranquilo para conversar, consultar tus actividades o simplemente pasar un rato agradable. ¿Te gustaría que hablemos de música o de cómo va tu día?",
       screen_text: "Espacio cordial para conversar a gusto",
       user_emotion: "NEUTRA",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "musica"
     },
     {
       spoken_text: "Aquí estoy para acompañarte con atención en lo que necesites durante esta jornada. Podemos platicar de cosas cotidianas o revisar cualquier información que te sea útil. ¿Quieres continuar con nuestra charla en este momento?",
       screen_text: "Escucho lo que quieras comentar",
       user_emotion: "NEUTRA",
-      suggested_action: "show_decision_buttons"
+      suggested_action: "show_decision_buttons",
+      image_key: "saludo"
     },
     {
       spoken_text: "Es muy grato escucharte y saber que estás por aquí para conversar un rato. Tomémonos el tiempo con serenidad para platicar de lo que más te llame la atención. ¿Qué actividad has estado realizando hoy en casa?",
       screen_text: "Compartiendo una charla amena y pausada",
       user_emotion: "NEUTRA",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "saludo"
     },
     {
       spoken_text: "Un placer saludarte nuevamente en este espacio de compañía. Me gusta mucho cuando conversamos sobre tus gustos, el clima o las historias que quieras compartir. ¿Hay algo en particular que te dé curiosidad hoy?",
       screen_text: "Conversación abierta sobre tus temas favoritos",
       user_emotion: "NEUTRA",
-      suggested_action: "continue"
+      suggested_action: "continue",
+      image_key: "saludo"
     }
   ],
 
@@ -531,37 +567,43 @@ const RESPONSE_VARIATIONS_BANK = {
       spoken_text: "Disculpa, creo que tu mensaje fue muy breve y quiero asegurarme de comprenderte bien. Tómate todo el tiempo que necesites para contármelo con un poquito más de detalle. ¿A qué tema o situación te refieres exactamente?",
       screen_text: "Cuéntame un poco más de detalle",
       user_emotion: "AMBIGUA",
-      suggested_action: "clarify"
+      suggested_action: "clarify",
+      image_key: "escucha"
     },
     {
       spoken_text: "Noté algo de duda en tus palabras y me gustaría entender mejor cómo puedo apoyarte hoy. No hay ninguna prisa, podemos ir conversando despacio hasta que la idea quede clara. ¿Me podrías explicar con otras palabras lo que tienes en mente?",
       screen_text: "Hablemos despacio para comprenderte mucho mejor",
       user_emotion: "AMBIGUA",
-      suggested_action: "clarify"
+      suggested_action: "clarify",
+      image_key: "escucha"
     },
     {
       spoken_text: "Quiero escucharte con toda claridad, pero no alcancé a captar el contexto completo de lo que me dijiste. Si quieres, dime si se trata de algún pendiente del día o de cómo te sientes ahora. ¿Cómo te gustaría que te ayude en este momento?",
       screen_text: "Aclaremos juntos lo que necesitas hoy",
       user_emotion: "AMBIGUA",
-      suggested_action: "clarify"
+      suggested_action: "clarify",
+      image_key: "escucha"
     },
     {
       spoken_text: "Es completamente normal no estar seguro de qué decir o tener una duda al empezar a hablar. Podemos conversar de tu agenda, de cómo va tu ánimo o simplemente platicar un rato. ¿Cuál de estas opciones prefieres explorar primero?",
       screen_text: "Elige con calma de qué hablar",
       user_emotion: "AMBIGUA",
-      suggested_action: "clarify"
+      suggested_action: "clarify",
+      image_key: "escucha"
     },
     {
       spoken_text: "Perdona si no logré seguir el hilo de esa frase tan cortita. Para mí es muy importante darte una respuesta útil y precisa en cada conversación. ¿Podrías repetirme tu idea con una frase un poco más amplia?",
       screen_text: "Por favor amplía un poco tu idea",
       user_emotion: "AMBIGUA",
-      suggested_action: "clarify"
+      suggested_action: "clarify",
+      image_key: "escucha"
     },
     {
       spoken_text: "Te escucho con atención, aunque todavía no me queda del todo claro lo que deseas consultar. Respira tranquilo y cuéntame si buscas recordar una actividad o compartir cómo te encuentras. ¿Qué es lo que más te interesa en este instante?",
       screen_text: "Con gusto te escucho con calma",
       user_emotion: "AMBIGUA",
-      suggested_action: "clarify"
+      suggested_action: "clarify",
+      image_key: "escucha"
     }
   ]
 };
@@ -607,6 +649,7 @@ Reglas obligatorias:
 - Anti-Repetición Estricta: PROHIBIDO repetir frases, saludos o estructuras similares a tus respuestas anteriores. Varía tus preguntas de cierre y vocabulario en cada turno.
 - Ética y posibles emergencias: PROHIBIDO recetar, indicar cantidades o ajustar dosis médicas. Si detectas dolor de pecho, asfixia, caída grave o ideación suicida, usa suggested_action="emergency_alert", transmite calma y pide que busque ayuda de una persona cercana o de su cuidador. NUNCA afirmes que tú vas a llamar, avisar o contactar a nadie: la app no tiene esa función.
 - suggested_action: "continue" (charla normal), "show_decision_buttons" (cuando cierras con una pregunta de sí/no), "clarify" (si la emoción es AMBIGUA), "emergency_alert" (riesgo vital).
+${buildImagePromptGuide()}
 - Memoria: usa el historial y las notas de la conversación para dar continuidad (por ejemplo, preguntar por el familiar o el plan que mencionó), con naturalidad y sin enumerarlas. En conversation_memory guarda solo datos que el usuario dijo; nunca inventes datos.
 Responde únicamente en JSON válido según el esquema.`;
 
@@ -637,6 +680,12 @@ const careResponseSchema = {
       enum: VALID_ACTIONS,
       description: "Acción de interfaz sugerida para la app Android."
     },
+    image_key: {
+      type: Type.STRING,
+      format: "enum",
+      enum: SELECTABLE_IMAGE_KEYS,
+      description: "Ilustración del banco local de la app que acompaña la respuesta (tema de la conversación)."
+    },
     // Campo interno: handleChat lo guarda en la sesión y lo quita antes de responder a la app
     conversation_memory: {
       type: Type.STRING,
@@ -644,8 +693,8 @@ const careResponseSchema = {
         "Notas breves (máximo 60 palabras, separadas por ';') con los datos que el usuario ha contado en toda la conversación: nombre, familiares, gustos, rutinas, planes y cómo ha estado. Reescribe las notas anteriores añadiendo lo nuevo. Cadena vacía si aún no hay datos."
     }
   },
-  required: ["user_emotion", "spoken_text", "screen_text", "suggested_action", "conversation_memory"],
-  propertyOrdering: ["user_emotion", "spoken_text", "screen_text", "suggested_action", "conversation_memory"]
+  required: ["user_emotion", "spoken_text", "screen_text", "suggested_action", "image_key", "conversation_memory"],
+  propertyOrdering: ["user_emotion", "spoken_text", "screen_text", "suggested_action", "image_key", "conversation_memory"]
 };
 
 // =============================================================================
@@ -945,6 +994,7 @@ function sanitizeAndEnforceGuardrails(responseObj, userInput, fallbackCategory, 
     sanitized.user_emotion = "NEGATIVA_ANSIEDAD_PREOCUPACION";
     sanitized.screen_text = EMERGENCY_SCREEN_TEXT;
     sanitized.spoken_text = EMERGENCY_SPOKEN_TEXT;
+    sanitized.image_key = EMERGENCY_IMAGE_KEY;
     return sanitized;
   }
 
@@ -960,6 +1010,7 @@ function sanitizeAndEnforceGuardrails(responseObj, userInput, fallbackCategory, 
       sanitized.screen_text = fallbackVariation.screen_text;
       sanitized.user_emotion = fallbackVariation.user_emotion;
       sanitized.suggested_action = fallbackVariation.suggested_action;
+      sanitized.image_key = detectImageTopic(userInput) || fallbackVariation.image_key;
     }
   }
 
@@ -974,6 +1025,7 @@ function sanitizeAndEnforceGuardrails(responseObj, userInput, fallbackCategory, 
     sanitized.spoken_text = "Comprendo lo que me dices sobre tus medicinas, pero recuerda que siempre debemos seguir las indicaciones exactas de tu médico de cabecera. ¿Quieres que contactemos a tu cuidador para consultarlo?";
     sanitized.screen_text = "Consulta siempre a tu médico";
     sanitized.suggested_action = "show_decision_buttons";
+    sanitized.image_key = MEDICAL_GUARDRAIL_IMAGE_KEY;
   }
 
   // 5. Garantizar que screen_text tenga entre 4 y 7 palabras y NO sea copia literal de spoken_text
@@ -999,6 +1051,14 @@ function sanitizeAndEnforceGuardrails(responseObj, userInput, fallbackCategory, 
     sanitized.suggested_action = sanitized.user_emotion === "AMBIGUA" ? "clarify" : "continue";
   }
 
+  // 7. Imagen del banco local: clave válida, apropiada para la emoción y fija en emergencias
+  sanitized.image_key = resolveImageKey({
+    candidate: sanitized.image_key,
+    userInput,
+    emotion: sanitized.user_emotion,
+    action: sanitized.suggested_action
+  });
+
   return sanitized;
 }
 
@@ -1011,12 +1071,15 @@ function generateMockResponse(userInput, session, preDetectedCategory = null) {
       spoken_text: EMERGENCY_SPOKEN_TEXT,
       screen_text: EMERGENCY_SCREEN_TEXT,
       user_emotion: "NEGATIVA_ANSIEDAD_PREOCUPACION",
-      suggested_action: "emergency_alert"
+      suggested_action: "emergency_alert",
+      image_key: EMERGENCY_IMAGE_KEY
     };
   }
 
   const category = preDetectedCategory || detectAffectiveSituation(userInput);
-  return selectNonRepeatingVariation(session, category);
+  const variation = selectNonRepeatingVariation(session, category);
+  // La imagen sigue al tema que mencionó el usuario; si no hay ninguno, a lo que dice la variación
+  return { ...variation, image_key: detectImageTopic(userInput) || variation.image_key };
 }
 
 // =============================================================================
@@ -1294,7 +1357,7 @@ async function handleChat(req, res, next) {
           aiStatus.stats.gemini++;
           aiStatus.lastSuccessAt = new Date().toISOString();
           console.log(
-            `🎯 [Gemini Emotion] Sesión="${sessionId}" | Emoción="${parsedOutput.user_emotion}" | Input=${userTextForLog(trimmedMessage)}`
+            `🎯 [Gemini Emotion] Sesión="${sessionId}" | Emoción="${parsedOutput.user_emotion}" | Imagen="${parsedOutput.image_key}" | Input=${userTextForLog(trimmedMessage)}`
           );
         } catch (llmError) {
           const info = describeGeminiError(llmError);

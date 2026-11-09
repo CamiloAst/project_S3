@@ -1,0 +1,38 @@
+<!-- Ilustración original del banco local de imágenes (ContextImage, clave "escucha"). -->
+<!-- Se puede sustituir por otra imagen con el mismo nombre de recurso sin tocar el código. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="240dp"
+    android:height="160dp"
+    android:viewportWidth="240"
+    android:viewportHeight="160">
+    <path
+        android:pathData="M72,22h72a22,22 0 0,1 22,22v30a22,22 0 0,1 -22,22h-72a22,22 0 0,1 -22,-22v-30a22,22 0 0,1 22,-22Z"
+        android:fillColor="#2E5C45" />
+    <path
+        android:pathData="M76,90L66,118L102,94Z"
+        android:fillColor="#2E5C45" />
+    <path
+        android:pathData="M95,48C95,36 121,36 121,50C121,60 108,60 108,70"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:pathData="M103.8,82a4.2,4.2 0 1,0 8.4,0a4.2,4.2 0 1,0 -8.4,0Z"
+        android:fillColor="#FFFFFF" />
+    <path
+        android:pathData="M148,84h38a20,20 0 0,1 20,20v6a20,20 0 0,1 -20,20h-38a20,20 0 0,1 -20,-20v-6a20,20 0 0,1 20,-20Z"
+        android:fillColor="#E1B98F" />
+    <path
+        android:pathData="M184,124L196,146L166,128Z"
+        android:fillColor="#E1B98F" />
+    <path
+        android:pathData="M145,107a5,5 0 1,0 10,0a5,5 0 1,0 -10,0Z"
+        android:fillColor="#8A5A3B" />
+    <path
+        android:pathData="M162,107a5,5 0 1,0 10,0a5,5 0 1,0 -10,0Z"
+        android:fillColor="#8A5A3B" />
+    <path
+        android:pathData="M179,107a5,5 0 1,0 10,0a5,5 0 1,0 -10,0Z"
+        android:fillColor="#8A5A3B" />
+</vector>

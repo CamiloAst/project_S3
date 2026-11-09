@@ -47,10 +47,12 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uq.seminario.projects3.avatar.AssistantAvatar
+import uq.seminario.projects3.images.ContextImage
 import uq.seminario.projects3.ui.components.AppNavigationHeader
 import uq.seminario.projects3.ui.components.AssistantAvatarBadge
 import uq.seminario.projects3.ui.components.AvatarCornerBadge
 import uq.seminario.projects3.ui.components.BasicControlsBar
+import uq.seminario.projects3.ui.components.ContextImageCard
 import uq.seminario.projects3.ui.theme.BeigeBackground
 import uq.seminario.projects3.ui.theme.CardSurface
 import uq.seminario.projects3.ui.theme.DarkText
@@ -64,7 +66,9 @@ import uq.seminario.projects3.ui.theme.ProjectS3Theme
 /**
  * Pantalla de Alerta de Posible Emergencia (`suggested_action = "emergency_alert"`).
  *
- * Redundancia (CARE): el mismo mensaje se lee en voz alta y se muestra en pantalla.
+ * Redundancia (CARE): el mismo mensaje se lee en voz alta, se muestra en pantalla y se ilustra
+ * con una imagen fija (`ContextImage.AYUDA_CERCANA`: una persona ayuda a otra), útil también
+ * para quien lee con dificultad. Ninguna otra respuesta puede mostrar esa imagen.
  * Asignación (CARE): la alerta se presenta de forma visual destacada, con botones grandes.
  *
  * Ambiente de pruebas: esta pantalla NO llama ni avisa a cuidadores ni a servicios de
@@ -162,6 +166,15 @@ fun EmergencyScreen(
                         modifier = Modifier
                             .fillMaxWidth()
                             .semantics { liveRegion = LiveRegionMode.Assertive }
+                    )
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    ContextImageCard(
+                        image = ContextImage.AYUDA_CERCANA,
+                        imageHeight = 120.dp,
+                        containerColor = CardSurface,
+                        borderColor = EmergencyBorder
                     )
 
                     Spacer(modifier = Modifier.height(12.dp))

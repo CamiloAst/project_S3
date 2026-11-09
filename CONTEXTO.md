@@ -14,6 +14,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - `app/src/main/java/uq/seminario/projects3/`
   - `audio/AudioEngine.kt`: reconocimiento de voz (variante de español del teléfono o es-CO) y reproducción.
   - `avatar/AssistantAvatar.kt` (acompañantes `MALE`/`FEMALE`, imágenes en `res/drawable-nodpi/avatar_*.webp`) y `avatar/AvatarPreferences.kt` (elección guardada en SharedPreferences `care_avatar`).
+  - `images/ContextImage.kt`: banco local de 18 ilustraciones (`res/drawable/img_*.xml`, vectores originales) que acompañan cada respuesta; `ui/components/ContextImageCard.kt` las dibuja.
   - `network/ChatApiClient.kt`: Retrofit, DTO todo-nullable y `toChatResponse()`.
   - `safety/EmergencyDetector.kt`: detector local de frases de emergencia.
   - `session/SessionIdProvider.kt`: `sessionId` único por instalación.
@@ -22,16 +23,16 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - `backend/`
   - `server.js`: Express, rate limit, rutas `/api/chat` y de sesión.
   - `controllers/chatController.js`: guardarraíl de emergencia, Gemini, banco de respuestas de respaldo, saneamiento.
-  - `services/emergencyDetector.js`, `services/sessionStore.js` (file/redis/memory), `services/ttsService.js` (una voz neural por acompañante, `VOICE_PROFILES`).
+  - `services/emergencyDetector.js`, `services/sessionStore.js` (file/redis/memory), `services/ttsService.js` (una voz neural por acompañante, `VOICE_PROFILES`), `services/imageCatalog.js` (claves del banco de imágenes, temas por palabras clave y reglas por emoción).
   - `middleware/security.js`: token Bearer y utilidades de privacidad de logs.
-  - `test/`: pruebas del controlador, detector (casos compartidos en `emergency-cases.json`), seguridad y voces del TTS.
+  - `test/`: pruebas del controlador, detector (casos compartidos en `emergency-cases.json`), catálogo de imágenes (claves compartidas con la app en `image-keys.json`), seguridad y voces del TTS.
 - `scripts/pruebas-usuarios/`: scripts de Windows PowerShell 5.1 (con `.cmd` para doble clic) para las pruebas con usuarios reales. `iniciar-pruebas` prepara cada jornada: backend, túnel HTTPS e instalación en el celular. `reiniciar-participante` deja la app como recién instalada. `comun.ps1` reúne las funciones compartidas. Los `.ps1` se guardan en UTF-8 con BOM, porque sin él PowerShell 5.1 lee mal los acentos.
 
 ## 4. Cómo ejecutar
 - Backend (desde `backend/`): `npm install`, copiar `.env.example` a `.env` y definir `GEMINI_API_KEY`; `npm run dev` (puerto 3000); `npm test`.
   Variables útiles: `API_ACCESS_TOKEN` (obligatoria con `NODE_ENV=production`), `SESSION_STORE`, `EDGE_TTS_ENABLED`, `EDGE_TTS_VOICE` / `EDGE_TTS_VOICE_MALE` (voces de la compañera y el compañero), `LOG_USER_TEXT`.
 - Android (desde la raíz): `./gradlew assembleDebug`, `./gradlew :app:testDebugUnitTest`. En este Windows usar el JDK de Android Studio (`JAVA_HOME=E:\Program Files\Android\Android Studio\jbr` y `-Dorg.gradle.java.home=...`).
-- Pruebas de UI en emulador (no corren en CI): `./gradlew :app:connectedDebugAndroidTest` (incluye `ThinkingScreenTest` y `AvatarSelectionScreenTest`). Ojo: esta tarea desinstala la app al terminar, así que se pierden los permisos concedidos y el acompañante elegido.
+- Pruebas de UI en emulador (no corren en CI): `./gradlew :app:connectedDebugAndroidTest` (incluye `ThinkingScreenTest`, `AvatarSelectionScreenTest` y `ContextImageCardTest`). Ojo: esta tarea desinstala la app al terminar, así que se pierden los permisos concedidos y el acompañante elegido.
 - Configuración app ↔ backend en `local.properties`: `care.apiBaseUrl.debug`, `care.apiBaseUrl.release` (HTTPS obligatorio), `care.apiToken` (igual a `API_ACCESS_TOKEN`).
 - Android 17+ (`targetSdk = 37`): la app debug pide al abrirse el permiso «Dispositivos cercanos / red local» (`ACCESS_LOCAL_NETWORK`). Si se deniega, no llega al backend (ni siquiera a `10.0.2.2`) y todas las respuestas salen del respaldo local. Alternativa sin permiso: `adb reverse tcp:3000 tcp:3000` y `care.apiBaseUrl.debug=http://127.0.0.1:3000/`.
 - Pruebas con usuarios reales en un celular del equipo (detalle en el README): `scripts\pruebas-usuarios\iniciar-pruebas.cmd` al empezar cada jornada, con el celular por USB; necesita `cloudflared` y `API_ACCESS_TOKEN`. Antes de cada participante: `scripts\pruebas-usuarios\reiniciar-participante.cmd`. Admiten `-Serial`; `iniciar-pruebas` también admite `-Url` (túnel propio) y `-SinPruebaChat`.
@@ -60,12 +61,18 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
   - La URL del túnel se pasa a Gradle con `-P` y no se escribe en `local.properties`, para no dejar el emulador apuntando a un túnel cerrado. Por eso el script se detiene si `local.properties` define `care.apiBaseUrl.debug`, que tendría prioridad.
   - El script no abre el túnel si el backend no exige token.
   - Arranca el backend con `node server.js` (sin `--watch`, que lo reinicia a mitad de una respuesta) y `TRUST_PROXY=1`.
+- Imágenes contextuales (2026-11-08) desde un **banco local**, no generadas: las ilustraciones viven en la app y el backend solo devuelve `image_key`. Generar o descargar imágenes exigiría un modelo de imagen (de pago o lento) y gastaría muchos tokens; elegir una clave de un enum cuesta unos 5 tokens de salida y unos 250 de entrada (instrucción del prompt + enum del esquema) y no añadió latencia (≈2 s por turno, igual que antes).
+  - CARE: Complementariedad (la imagen muestra el tema, no repite `screen_text`); Asignación (apoyo visual, nunca el único canal de un dato o una acción, y en la decisión va al lado del avatar para no quitar alto a los botones); Redundancia (la emergencia muestra siempre `ayuda_cercana`, que ninguna otra respuesta puede usar); Equivalencia (TalkBack lee "Imagen: <descripción>").
+  - 17 claves elegibles + 1 reservada. Sin Gemini, la imagen sale del tema del mensaje (palabras clave) y si no, de la emoción; así el respaldo también muestra, por ejemplo, la familia cuando el usuario habla de sus nietos.
+  - Con tristeza o preocupación no se muestran `familia` ni `alegria` (una familia sonriente puede acentuar la soledad de quien extraña a sus hijos); se usan compañía o calma. Nunca hay imágenes de medicamentos: lo médico usa `salud` (carpeta con un corazón).
+  - Ilustraciones vectoriales originales (sin licencias de terceros, 76 KB en total), estilo pictograma sin rasgos faciales y con personas mayores de pelo canoso, para no infantilizar. Se pueden sustituir por otra imagen con el mismo nombre de recurso.
 - Reinicio entre participantes: el `sessionId` es uno por instalación, así que en un celular compartido el siguiente participante heredaría el historial y las notas de memoria del anterior. `reiniciar-participante`:
   - lee el `sessionId` con `run-as` (solo posible en debug) y borra esa sesión del backend;
   - hace `pm clear` y `logcat -c`;
   - vuelve a conceder los permisos con `pm grant`, para que el participante no vea diálogos.
 
 ## 6. Estado actual
+- Imágenes contextuales funcionando (2026-11-08): backend 39/39, `:app:testDebugUnitTest` 21/21 y `ContextImageCardTest` 4/4 en el emulador (Android 17). Las capturas de las pantallas de respuesta, recomendación, decisión y emergencia caben enteras en un teléfono de 1080×2400. Con Gemini real (`gemini-3.5-flash`), "vinieron mis nietos… contenta" devolvió `familia` y "me siento muy sola, mis hijos ya no me llaman" devolvió `acompanamiento`. Falta verlo en una conversación completa por voz en el teléfono.
 - Correcciones de criticidad alta, media y baja integradas en `main` (PR #2, #3 y #4).
 - App preparada para pruebas con usuarios reales (rama `feat/pruebas-usuarios`): sin barra de prueba, con pantalla "Pensando" e icono de escucha reactivo a la voz.
 - Pruebas en verde al 2026-11-03: backend 29/29, `:app:testDebugUnitTest` 15/15, `ThinkingScreenTest` 3/3, `AvatarSelectionScreenTest` 3/3 y `VoiceInputScreenTest` 2/2 en emulador. Prueba en vivo de la voz (6 respuestas, dos tras 65 s sin uso): 6/6 con audio neural, generado en 2,3-4,4 s; el camino de reintento no llegó a activarse en esa prueba.
@@ -82,6 +89,8 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Problemas conocidos: el `JAVA_HOME` global de esta máquina apunta a un JRE inexistente.
 
 ## 7. Próximos pasos
+- Observar en las pruebas con usuarios si las imágenes ayudan o distraen (añadir una pregunta al protocolo) y si algún tema frecuente no tiene imagen; para añadirla, actualizar `imageCatalog.js`, `ContextImage.kt`, `image-keys.json` y el drawable.
+- En teléfonos pequeños la pantalla de recomendación necesita desplazarse para ver la tarjeta de respiración; revisarlo en el celular del equipo.
 - Instalar `cloudflared` y ensayar `iniciar-pruebas.cmd` con el celular del equipo: que `/quicktunnel` devuelva la URL y que el mensaje de prueba llegue por el túnel.
 - Cerrar las preguntas abiertas del protocolo: edad mínima, aval de ética, fechas, grabación e inclusión de la emergencia simulada.
 - Escuchar las muestras de `muestras-voz/` y, si otra voz suena más natural (p. ej. las multilingües de Edge), fijarla con `EDGE_TTS_VOICE` / `EDGE_TTS_VOICE_MALE` sin tocar código. Revisar `tts.stats` en `/api/health` tras una sesión real.
@@ -93,6 +102,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Definir la URL HTTPS de release y desplegar el backend con `API_ACCESS_TOKEN`.
 
 ## 8. Historial
+- **2026-11-08**: imágenes contextuales del modelo CARE desde un banco local. Nuevo campo `image_key` en `/api/chat` (Gemini lo elige de un enum; el respaldo usa el tema del mensaje o la emoción), `services/imageCatalog.js`, 18 ilustraciones vectoriales originales, `ContextImage` y `ContextImageCard` en las pantallas de respuesta, recomendación, decisión y emergencia. Pruebas: 10 nuevas en el backend, 6 unitarias y 4 de UI en la app; claves compartidas en `backend/test/image-keys.json`.
 - **2026-11-03 (9)**: preparación de las pruebas con usuarios reales. Nuevos scripts en `scripts/pruebas-usuarios/`:
   - `iniciar-pruebas`: backend con `TRUST_PROXY=1`, comprobación del token, túnel de Cloudflare, instalación con `-P`, permisos y mensaje de prueba;
   - `reiniciar-participante`: borra la sesión en el backend, hace `pm clear` y `logcat -c` y vuelve a conceder los permisos.
