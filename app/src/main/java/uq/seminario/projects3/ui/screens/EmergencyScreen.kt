@@ -47,6 +47,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uq.seminario.projects3.avatar.AssistantAvatar
+import uq.seminario.projects3.avatar.AvatarExpression
 import uq.seminario.projects3.images.ContextImage
 import uq.seminario.projects3.ui.components.AppNavigationHeader
 import uq.seminario.projects3.ui.components.AssistantAvatarBadge
@@ -127,6 +128,7 @@ fun EmergencyScreen(
                         avatar = avatar,
                         avatarSize = 112.dp,
                         isSpeaking = !isPaused,
+                        mood = AvatarExpression.EMPATHETIC,
                         waveColor = EmergencyRed,
                         borderColor = EmergencyRed,
                         contentDescription = "Alerta. ${avatar.title} te pide buscar ayuda",

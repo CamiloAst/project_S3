@@ -13,7 +13,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 ## 3. Estructura
 - `app/src/main/java/uq/seminario/projects3/`
   - `audio/AudioEngine.kt`: reconocimiento de voz (variante de español del teléfono o es-CO) y reproducción.
-  - `avatar/AssistantAvatar.kt` (acompañantes `MALE`/`FEMALE`, imágenes en `res/drawable-nodpi/avatar_*.webp`) y `avatar/AvatarPreferences.kt` (elección guardada en SharedPreferences `care_avatar`).
+  - `avatar/AssistantAvatar.kt` (acompañantes `MALE`/`FEMALE`, imágenes en `res/drawable-nodpi/avatar_*.webp`), `avatar/AvatarExpression.kt` (gestos del avatar según la emoción) y `avatar/AvatarPreferences.kt` (elección guardada en SharedPreferences `care_avatar`).
   - `images/ContextImage.kt`: banco local de 18 ilustraciones (`res/drawable/img_*.xml`, vectores originales) que acompañan cada respuesta; `ui/components/ContextImageCard.kt` las dibuja.
   - `network/ChatApiClient.kt`: Retrofit, DTO todo-nullable y `toChatResponse()`.
   - `safety/EmergencyDetector.kt`: detector local de frases de emergencia.
@@ -32,7 +32,7 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Backend (desde `backend/`): `npm install`, copiar `.env.example` a `.env` y definir `GEMINI_API_KEY`; `npm run dev` (puerto 3000); `npm test`.
   Variables útiles: `API_ACCESS_TOKEN` (obligatoria con `NODE_ENV=production`), `SESSION_STORE`, `EDGE_TTS_ENABLED`, `EDGE_TTS_VOICE` / `EDGE_TTS_VOICE_MALE` (voces de la compañera y el compañero), `LOG_USER_TEXT`.
 - Android (desde la raíz): `./gradlew assembleDebug`, `./gradlew :app:testDebugUnitTest`. En este Windows usar el JDK de Android Studio (`JAVA_HOME=E:\Program Files\Android\Android Studio\jbr` y `-Dorg.gradle.java.home=...`).
-- Pruebas de UI en emulador (no corren en CI): `./gradlew :app:connectedDebugAndroidTest` (incluye `ThinkingScreenTest`, `AvatarSelectionScreenTest` y `ContextImageCardTest`). Ojo: esta tarea desinstala la app al terminar, así que se pierden los permisos concedidos y el acompañante elegido.
+- Pruebas de UI en emulador (no corren en CI): `./gradlew :app:connectedDebugAndroidTest` (incluye `ThinkingScreenTest`, `AvatarSelectionScreenTest`, `ContextImageCardTest` y `AssistantAvatarBadgeTest`). Ojo: esta tarea desinstala la app al terminar, así que se pierden los permisos concedidos y el acompañante elegido.
 - Configuración app ↔ backend en `local.properties`: `care.apiBaseUrl.debug`, `care.apiBaseUrl.release` (HTTPS obligatorio), `care.apiToken` (igual a `API_ACCESS_TOKEN`).
 - Android 17+ (`targetSdk = 37`): la app debug pide al abrirse el permiso «Dispositivos cercanos / red local» (`ACCESS_LOCAL_NETWORK`). Si se deniega, no llega al backend (ni siquiera a `10.0.2.2`) y todas las respuestas salen del respaldo local. Alternativa sin permiso: `adb reverse tcp:3000 tcp:3000` y `care.apiBaseUrl.debug=http://127.0.0.1:3000/`.
 - Pruebas con usuarios reales en un celular del equipo (detalle en el README): `scripts\pruebas-usuarios\iniciar-pruebas.cmd` al empezar cada jornada, con el celular por USB; necesita `cloudflared` y `API_ACCESS_TOKEN`. Antes de cada participante: `scripts\pruebas-usuarios\reiniciar-participante.cmd`. Admiten `-Serial`; `iniciar-pruebas` también admite `-Url` (túnel propio) y `-SinPruebaChat`.
@@ -70,8 +70,16 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
   - lee el `sessionId` con `run-as` (solo posible en debug) y borra esa sesión del backend;
   - hace `pm clear` y `logcat -c`;
   - vuelve a conceder los permisos con `pm grant`, para que el participante no vea diálogos.
+- Avatar con emociones (2026-11-09), requisito del profesor: «el avatar debe representar emociones correspondientes a lo que está diciendo».
+  - El gesto se deduce en el cliente de `user_emotion`, sin campo nuevo en la API: la respuesta ya se ajusta a esa emoción (y la prosodia de la voz también), así que el gesto coincide con el tono de lo que dice. Funciona igual con Gemini, con el banco de respaldo y con el respaldo local.
+  - `POSITIVA` → alegre; `NEGATIVA_TRISTEZA_SOLEDAD` y `NEGATIVA_ANSIEDAD_PREOCUPACION` → comprensivo (imagen "triste"); `AMBIGUA` → pensativo; `NEUTRA` → la imagen base de saludo. "Pensando" y la reparación usan el pensativo; la emergencia, el comprensivo.
+  - Mientras habla: 1,6 s de gesto (reacción) y luego la pose de hablar, en ciclos de 6 s para que la emoción siga a la vista en mensajes largos. Con el gesto neutral habla todo el tiempo, porque alternar el saludo parecería que saluda una y otra vez.
+  - Animaciones suaves para personas mayores: fundido de 450 ms, rebote leve al llegar un gesto nuevo y pulso del 3 % al hablar. En la web, `prefers-reduced-motion` las quita y deja solo la pose de hablar.
+  - CARE: Redundancia con el tono de la voz; Asignación (solo apoyo visual, nunca el único canal); Equivalencia (TalkBack lee el gesto como estado del avatar y la web lo pone en el texto alternativo).
+  - Las imágenes del usuario eran 4 por acompañante (alegre, triste, pensativo, hablando), sin una "neutra" aparte: se usa la de saludo. Son WebP estáticos; la animación la hace el código.
 
 ## 6. Estado actual
+- Avatar con emociones funcionando (2026-11-09) en la app y en la web de pruebas (`pruebas-web`, sin desplegar aún). App: `:app:testDebugUnitTest` 28/28 y pruebas de UI 20/20 en el emulador (Android 17), con capturas de las pantallas alegre, comprensivo y pensativo. Web: `npm test` 45/45 en `pruebas-web` y recorrido en el navegador con el banco de respaldo (positiva → alegre, soledad y preocupación → comprensivo, ambiguo → pensativo, emergencia → comprensivo con borde rojo). Falta verlo con voz real en el teléfono y en el iPhone.
 - Imágenes contextuales funcionando (2026-11-08): backend 39/39, `:app:testDebugUnitTest` 21/21 y `ContextImageCardTest` 4/4 en el emulador (Android 17). Las capturas de las pantallas de respuesta, recomendación, decisión y emergencia caben enteras en un teléfono de 1080×2400. Con Gemini real (`gemini-3.5-flash`), "vinieron mis nietos… contenta" devolvió `familia` y "me siento muy sola, mis hijos ya no me llaman" devolvió `acompanamiento`. Falta verlo en una conversación completa por voz en el teléfono.
 - Correcciones de criticidad alta, media y baja integradas en `main` (PR #2, #3 y #4).
 - App preparada para pruebas con usuarios reales (rama `feat/pruebas-usuarios`): sin barra de prueba, con pantalla "Pensando" e icono de escucha reactivo a la voz.
@@ -96,12 +104,15 @@ Asistente conversacional por voz para personas mayores (interfaz y contenidos en
 - Escuchar las muestras de `muestras-voz/` y, si otra voz suena más natural (p. ej. las multilingües de Edge), fijarla con `EDGE_TTS_VOICE` / `EDGE_TTS_VOICE_MALE` sin tocar código. Revisar `tts.stats` en `/api/health` tras una sesión real.
 - Probar con Gemini real y en un teléfono que el compañero habla con voz y género masculinos; si el tono bajo del respaldo local suena mal, buscar en `tts.voices` una voz masculina conocida del motor de Google.
 - Los textos fijos aún tratan al usuario en masculino genérico ("tranquilo", "acompañado"); el género del usuario no se conoce.
-- Revisar la licencia/atribución de las imágenes de los avatares si vienen de un banco de imágenes.
+- Revisar la licencia/atribución de las imágenes de los avatares (también las de los gestos) si vienen de un banco de imágenes.
+- Si se hace una imagen "neutra" propia para cada acompañante, añadirla a `drawable-nodpi` y `backend/public/img/` y apuntar `AvatarExpression.NEUTRAL` a ella en `AssistantAvatar.imageFor` (y en `imagenDelGesto` de la web).
+- Observar en las pruebas con usuarios si el cambio de gesto mientras habla se entiende o distrae; los tiempos están en `AvatarExpression` (`MOOD_POSE_MS`, `TALKING_POSE_MS`) y en `@keyframes alternar-pose` de la web.
 - Comprobar con Gemini real que una conversación larga recuerda datos del principio y medir si la latencia sube.
 - Probar el flujo completo en un dispositivo físico contra el backend con Gemini real (voz real: animación del icono y pantalla "Pensando").
 - Definir la URL HTTPS de release y desplegar el backend con `API_ACCESS_TOKEN`.
 
 ## 8. Historial
+- **2026-11-09**: el avatar representa la emoción de lo que dice. `AvatarExpression` (gesto por `user_emotion` y ciclo gesto/hablar), `AssistantAvatar.imageFor`, `AnimatedAvatarImage` en `AssistantAvatarBadge` y `ThinkingScreen`, y 8 imágenes nuevas (alegre, triste, pensativo y hablando por acompañante). Pruebas: `AvatarExpressionTest` (7, unitaria) y `AssistantAvatarBadgeTest` (7, UI). Lo mismo en la web de `pruebas-web` (`gestoPorEmocion`, imágenes superpuestas y animación CSS) con 1 prueba nueva.
 - **2026-11-08**: imágenes contextuales del modelo CARE desde un banco local. Nuevo campo `image_key` en `/api/chat` (Gemini lo elige de un enum; el respaldo usa el tema del mensaje o la emoción), `services/imageCatalog.js`, 18 ilustraciones vectoriales originales, `ContextImage` y `ContextImageCard` en las pantallas de respuesta, recomendación, decisión y emergencia. Pruebas: 10 nuevas en el backend, 6 unitarias y 4 de UI en la app; claves compartidas en `backend/test/image-keys.json`.
 - **2026-11-03 (9)**: preparación de las pruebas con usuarios reales. Nuevos scripts en `scripts/pruebas-usuarios/`:
   - `iniciar-pruebas`: backend con `TRUST_PROXY=1`, comprobación del token, túnel de Cloudflare, instalación con `-P`, permisos y mensaje de prueba;

@@ -46,6 +46,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uq.seminario.projects3.avatar.AssistantAvatar
+import uq.seminario.projects3.avatar.AvatarExpression
 import uq.seminario.projects3.images.ContextImage
 import uq.seminario.projects3.ui.components.AppNavigationHeader
 import uq.seminario.projects3.ui.components.AssistantAvatarBadge
@@ -164,6 +165,8 @@ fun RecommendationScreen(
                         avatar = avatar,
                         avatarSize = 96.dp,
                         isSpeaking = !isPaused,
+                        // Esta pantalla solo se usa con tristeza, soledad, ansiedad o preocupación
+                        mood = AvatarExpression.EMPATHETIC,
                         borderColor = SereneWarmCardSurface,
                         contentDescription = if (!isPaused) {
                             "${avatar.title} te acompaña hablando en voz alta"

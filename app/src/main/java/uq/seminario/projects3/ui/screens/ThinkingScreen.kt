@@ -8,9 +8,7 @@ import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -37,8 +35,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -50,9 +46,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
 import uq.seminario.projects3.avatar.AssistantAvatar
+import uq.seminario.projects3.avatar.AvatarExpression
+import uq.seminario.projects3.ui.components.AnimatedAvatarImage
 import uq.seminario.projects3.ui.components.AppNavigationHeader
 import uq.seminario.projects3.ui.theme.BeigeBackground
-import uq.seminario.projects3.ui.theme.CardSurface
 import uq.seminario.projects3.ui.theme.DarkText
 import uq.seminario.projects3.ui.theme.MutedDarkText
 import uq.seminario.projects3.ui.theme.PrimaryDarkGreen
@@ -258,14 +255,11 @@ private fun ThinkingIndicator(
                     .background(PrimaryDarkGreen.copy(alpha = 0.14f))
             )
 
-            Image(
-                painter = painterResource(avatar.imageRes),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier
-                    .size(128.dp)
-                    .clip(CircleShape)
-                    .border(width = 3.dp, color = CardSurface, shape = CircleShape)
+            // Gesto pensativo mientras espera la respuesta (mano en la barbilla)
+            AnimatedAvatarImage(
+                avatar = avatar,
+                mood = AvatarExpression.THOUGHTFUL,
+                modifier = Modifier.size(128.dp)
             )
         }
 

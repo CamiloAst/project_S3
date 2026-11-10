@@ -14,9 +14,15 @@ import uq.seminario.projects3.audio.AudioEngine
  * (Gonzalo / Salomé) y el género con el que el asistente habla de sí.
  * `localTtsPitch` es el tono del TTS local de respaldo: Android no indica el género de sus
  * voces, así que para el compañero se baja el tono de la voz española disponible.
+ * `imageRes` es la imagen base (saludo), que también sirve de gesto neutral; las demás son los
+ * gestos de [AvatarExpression] (ver [imageFor]).
  */
 enum class AssistantAvatar(
     @param:DrawableRes val imageRes: Int,
+    @param:DrawableRes private val happyImageRes: Int,
+    @param:DrawableRes private val empatheticImageRes: Int,
+    @param:DrawableRes private val thoughtfulImageRes: Int,
+    @param:DrawableRes private val talkingImageRes: Int,
     val label: String,
     val imageDescription: String,
     val apiValue: String,
@@ -24,6 +30,10 @@ enum class AssistantAvatar(
 ) {
     MALE(
         imageRes = R.drawable.avatar_companero,
+        happyImageRes = R.drawable.avatar_companero_alegre,
+        empatheticImageRes = R.drawable.avatar_companero_triste,
+        thoughtfulImageRes = R.drawable.avatar_companero_pensativo,
+        talkingImageRes = R.drawable.avatar_companero_hablando,
         label = "Compañero",
         imageDescription = "Hombre de cabello corto con gafas verdes que saluda con la mano",
         apiValue = "male",
@@ -31,6 +41,10 @@ enum class AssistantAvatar(
     ),
     FEMALE(
         imageRes = R.drawable.avatar_companera,
+        happyImageRes = R.drawable.avatar_companera_alegre,
+        empatheticImageRes = R.drawable.avatar_companera_triste,
+        thoughtfulImageRes = R.drawable.avatar_companera_pensativa,
+        talkingImageRes = R.drawable.avatar_companera_hablando,
         label = "Compañera",
         imageDescription = "Mujer de cabello largo con gafas verdes que saluda con la mano",
         apiValue = "female",
@@ -39,6 +53,16 @@ enum class AssistantAvatar(
 
     /** Nombre con posesivo para los textos de pantalla: "Tu compañero" / "Tu compañera". */
     val title: String get() = "Tu ${label.lowercase()}"
+
+    /** Imagen del acompañante con el gesto indicado. */
+    @DrawableRes
+    fun imageFor(expression: AvatarExpression): Int = when (expression) {
+        AvatarExpression.NEUTRAL -> imageRes
+        AvatarExpression.HAPPY -> happyImageRes
+        AvatarExpression.EMPATHETIC -> empatheticImageRes
+        AvatarExpression.THOUGHTFUL -> thoughtfulImageRes
+        AvatarExpression.TALKING -> talkingImageRes
+    }
 
     companion object {
         // Si aún no hay elección, se usa el femenino porque la voz neural del backend
