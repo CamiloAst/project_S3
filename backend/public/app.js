@@ -19,10 +19,43 @@
   // WAV vacío: reproducirlo con el primer toque desbloquea el audio en Safari (sin gesto no suena)
   const SILENCIO = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=";
 
-  // Las claves son los valores de `companion` en POST /api/chat (VOICE_PROFILES en ttsService.js)
+  // Las claves son los valores de `companion` en POST /api/chat (VOICE_PROFILES en ttsService.js).
+  // `imagen` es la imagen base (saludo), que también es el gesto neutral; `gestos`, las demás
+  // expresiones (AssistantAvatar.imageFor en la app, mismas imágenes de res/drawable-nodpi).
   const ACOMPANANTES = {
-    male: { etiqueta: "Compañero", imagen: "img/avatar_companero.webp", tonoLocal: 0.8 },
-    female: { etiqueta: "Compañera", imagen: "img/avatar_companera.webp", tonoLocal: 1.0 }
+    male: {
+      etiqueta: "Compañero",
+      imagen: "img/avatar_companero.webp",
+      gestos: {
+        alegre: "img/avatar_companero_alegre.webp",
+        comprensivo: "img/avatar_companero_triste.webp",
+        pensativo: "img/avatar_companero_pensativo.webp",
+        hablando: "img/avatar_companero_hablando.webp"
+      },
+      tonoLocal: 0.8
+    },
+    female: {
+      etiqueta: "Compañera",
+      imagen: "img/avatar_companera.webp",
+      gestos: {
+        alegre: "img/avatar_companera_alegre.webp",
+        comprensivo: "img/avatar_companera_triste.webp",
+        pensativo: "img/avatar_companera_pensativa.webp",
+        hablando: "img/avatar_companera_hablando.webp"
+      },
+      tonoLocal: 1.0
+    }
+  };
+
+  // El avatar representa la emoción de lo que dice (AvatarExpression.kt en la app): el gesto sale de
+  // `user_emotion`, porque la respuesta se ajusta a esa emoción. Es apoyo visual (CARE: Redundancia
+  // con el tono de la voz) y el lector de pantalla lo lee en el texto alternativo (Equivalencia).
+  // Mientras habla, estilos.css alterna el gesto con la pose de hablar (ciclo de 6 s, como la app).
+  const GESTOS = {
+    neutral: "gesto tranquilo",
+    alegre: "gesto alegre",
+    comprensivo: "gesto comprensivo",
+    pensativo: "gesto pensativo"
   };
 
   // Banco local de imágenes (modelo CARE): mismas claves y descripciones que ContextImage.kt en la
@@ -147,6 +180,30 @@
 
   function esAfectiva(emocion) {
     return /TRISTEZA|SOLEDAD|ANSIEDAD|PREOCUPACION/.test(emocion || "");
+  }
+
+  // Como AvatarExpression.forEmotion en la app (emoción desconocida o vacía → neutral)
+  function gestoPorEmocion(emocion) {
+    const valor = String(emocion || "").trim().toUpperCase();
+    if (valor === "POSITIVA") return "alegre";
+    if (valor.startsWith("NEGATIVA")) return "comprensivo";
+    if (valor === "AMBIGUA") return "pensativo";
+    return "neutral";
+  }
+
+  function imagenDelGesto(datos, gesto) {
+    return gesto === "neutral" ? datos.imagen : datos.gestos[gesto];
+  }
+
+  // Descarga los gestos del acompañante elegido antes de que hagan falta, para que el primer
+  // cambio de expresión no deje el círculo vacío mientras llega la imagen
+  function precargarGestos() {
+    const datos = ACOMPANANTES[acompanante];
+    if (!datos) return;
+    for (const src of Object.values(datos.gestos)) {
+      const imagen = new Image();
+      imagen.src = src;
+    }
   }
 
   // Como ContextImage.resolve en la app: la emergencia lleva siempre su imagen; una clave ausente
@@ -557,6 +614,7 @@
     vibrar();
     acompanante = clave;
     almacen.guardar(CLAVES.acompanante, clave);
+    precargarGestos();
     transicion({ tipo: "inicio" });
   }
 
@@ -633,13 +691,19 @@
       conInicio && h("button", { clase: "boton-nav", type: "button", onclick: irAInicio, "aria-label": "Ir a la pantalla de inicio" }, "🏠 Inicio"));
   }
 
-  function avatar({ alerta = false, distintivo = null, alTocar = null } = {}) {
+  // Dos imágenes superpuestas: el gesto y, encima, la pose de hablar, que estilos.css muestra
+  // mientras suena la voz (clase "hablando", ver actualizarIndicadores)
+  function avatar({ alerta = false, distintivo = null, alTocar = null, gesto = "neutral" } = {}) {
     const datos = ACOMPANANTES[acompanante] || ACOMPANANTES.female;
+    const nombre = `Tu ${datos.etiqueta.toLowerCase()}`;
+    const descripcion = gesto === "neutral" ? nombre : `${nombre}, ${GESTOS[gesto]}`;
     const contenido = [
-      h("img", { src: datos.imagen, alt: alTocar ? "" : `Tu ${datos.etiqueta.toLowerCase()}`, width: 128, height: 128 }),
+      h("span", { clase: "poses" },
+        h("img", { clase: "pose-gesto", src: imagenDelGesto(datos, gesto), alt: alTocar ? "" : descripcion, width: 128, height: 128 }),
+        h("img", { clase: "pose-hablando", src: datos.gestos.hablando, alt: "", width: 128, height: 128 })),
       distintivo && h("span", { clase: "distintivo", "aria-hidden": "true" }, distintivo)
     ];
-    const atributos = { clase: `avatar${alerta ? " alerta" : ""}`, "data-avatar": true };
+    const atributos = { clase: `avatar gesto-${gesto}${alerta ? " alerta" : ""}`, "data-avatar": true };
     if (!alTocar) return h("div", atributos, ...contenido);
     return h("button", { ...atributos, type: "button", onclick: alTocar, "aria-label": "Cambiar de acompañante" }, ...contenido);
   }
@@ -777,7 +841,8 @@
       return [
         cabecera(),
         h("div", { clase: "crece" },
-          avatar(),
+          // Gesto pensativo mientras espera la respuesta, como ThinkingScreen en la app
+          avatar({ gesto: "pensativo" }),
           h("p", { clase: "centro suave" }, "Ya te escuché"),
           h("h1", {}, p.largo ? "Sigo pensando, gracias por esperar" : "Estoy pensando qué responderte"),
           h("div", { clase: "puntos", role: "img", "aria-label": "Procesando tu mensaje" }, h("span"), h("span"), h("span")),
@@ -790,7 +855,7 @@
       return [
         cabecera(),
         h("div", { clase: "crece" },
-          avatar(),
+          avatar({ gesto: gestoPorEmocion(p.emocion) }),
           imagenTema(p.imagen),
           h("div", { clase: "tarjeta" }, h("h1", { clase: "resumen" }, p.resumen)),
           esAfectiva(p.emocion) && h("p", { clase: "respiracion" }, "Inhala despacio y exhala suavemente"),
@@ -804,7 +869,7 @@
         cabecera(),
         h("div", { clase: "crece" },
           // Como en la app: la imagen va junto al avatar para no restar espacio a los botones Sí/No
-          h("div", { clase: "fila-avatar" }, avatar(), imagenTema(p.imagen, { compacta: true })),
+          h("div", { clase: "fila-avatar" }, avatar({ gesto: gestoPorEmocion(p.emocion) }), imagenTema(p.imagen, { compacta: true })),
           h("div", { clase: "tarjeta" }, h("h1", { clase: "resumen" }, p.pregunta)),
           h("button", { clase: "decision si", type: "button", onclick: () => decidir(true) },
             h("strong", {}, "Sí"), h("span", {}, "Seguir hablando con tu asistente")),
@@ -819,7 +884,7 @@
       return [
         cabecera(),
         h("div", { clase: "crece" },
-          avatar({ distintivo: "🔍" }),
+          avatar({ distintivo: "🔍", gesto: "pensativo" }),
           h("p", { clase: "centro suave" }, "Estamos para escucharte"),
           h("div", { clase: "tarjeta" }, h("h1", { clase: "resumen" }, p.mensaje)),
           h("p", { clase: "centro" }, p.pista),
@@ -831,7 +896,7 @@
     emergencia(p) {
       return [
         h("div", { clase: "crece" },
-          avatar({ alerta: true, distintivo: "!" }),
+          avatar({ alerta: true, distintivo: "!", gesto: "comprensivo" }),
           h("p", { clase: "etiqueta-alerta" }, "Posible emergencia"),
           h("div", { clase: "tarjeta emergencia" }, h("h1", { clase: "resumen" }, p.resumen)),
           imagenTema(IMAGEN_EMERGENCIA),
@@ -869,6 +934,7 @@
   // ===========================================================================
 
   function iniciar() {
+    precargarGestos();
     const codigoDelEnlace = new URLSearchParams(location.hash.slice(1)).get("codigo");
     if (location.hash) history.replaceState(null, "", location.pathname + location.search);
     if (codigoDelEnlace && codigoDelEnlace !== token) {

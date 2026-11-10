@@ -44,6 +44,22 @@ test("sirve los recursos de la página sin tapar las rutas de la API", async () 
   assert.equal((await fetch(`${baseUrl}/api/health`)).status, 200);
 });
 
+test("sirve cada gesto de los dos acompañantes y app.js los usa todos", async () => {
+  const gestos = [
+    "avatar_companera_alegre", "avatar_companera_triste", "avatar_companera_pensativa", "avatar_companera_hablando",
+    "avatar_companero_alegre", "avatar_companero_triste", "avatar_companero_pensativo", "avatar_companero_hablando"
+  ];
+  for (const nombre of gestos) {
+    const respuesta = await fetch(`${baseUrl}/img/${nombre}.webp`);
+    assert.equal(respuesta.status, 200, `img/${nombre}.webp`);
+    assert.ok(appJs().includes(`"img/${nombre}.webp"`), `${nombre} en ACOMPANANTES`);
+  }
+  // Las 5 emociones de user_emotion tienen su gesto (AvatarExpression.forEmotion en la app)
+  assert.match(appJs(), /valor === "POSITIVA"\) return "alegre"/);
+  assert.match(appJs(), /valor\.startsWith\("NEGATIVA"\)\) return "comprensivo"/);
+  assert.match(appJs(), /valor === "AMBIGUA"\) return "pensativo"/);
+});
+
 test("la página nunca interpreta como HTML los textos que llegan del servidor", () => {
   assert.doesNotMatch(appJs(), /innerHTML|outerHTML|insertAdjacentHTML|document\.write|\beval\(/);
 });
@@ -64,6 +80,6 @@ test("la web tiene una ilustración y una descripción para cada clave del banco
 
 test("los acompañantes de la web son las voces del backend", () => {
   for (const companion of Object.keys(VOICE_PROFILES)) {
-    assert.match(appJs(), new RegExp(`\\b${companion}: \\{ etiqueta:`), companion);
+    assert.match(appJs(), new RegExp(`\\b${companion}: \\{\\s*etiqueta:`), companion);
   }
 });
